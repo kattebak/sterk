@@ -1,0 +1,61 @@
+{
+	"name": "@kattebak/sterk",
+	"version": "0.0.0",
+	"description": "Touch-friendly terminal emulator for the web — Ace renderer + clean-room VT core. OSC 133 first-class.",
+	"keywords": [
+		"terminal",
+		"emulator",
+		"vt",
+		"ace",
+		"osc",
+		"shell-integration",
+		"touch",
+		"web"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/kattebak/sterk.git"
+	},
+	"bugs": {
+		"url": "https://github.com/kattebak/sterk/issues"
+	},
+	"homepage": "https://github.com/kattebak/sterk#readme",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"publishConfig": {
+		"access": "public"
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"engines": {
+		"node": ">=20"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"test": "vitest run",
+		"lint": "biome check",
+		"format": "biome format --write",
+		"fix": "biome check --write",
+		"typecheck": "tsc --noEmit",
+		"check": "npm run lint && npm run typecheck && npm test",
+		"prepublishOnly": "npm run build"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.7",
+		"@types/node": "^22.18.11",
+		"semantic-release": "^24.2.0",
+		"typescript": "^5.9.3",
+		"vitest": "^3.0.0"
+	}
+}
