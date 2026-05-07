@@ -52,18 +52,14 @@ export { EventEmitter } from "./util/event_emitter.js";
 
 // ── Constructor Stub ─────────────────────────────────────────────────
 
+import { TerminalImpl } from "./terminal.js";
 import type { Terminal, TerminalOptions } from "./types.js";
 
 /**
  * Create a new Terminal instance.
  *
- * **NOT YET IMPLEMENTED** — this is a type-safe stub for the M0 API contract.
- * Consumers can import and reference this constructor to typecheck their code,
- * but calling it will throw an error until the implementation lands in M1+.
- *
  * @param options - Terminal configuration options
- * @returns Terminal instance (when implemented)
- * @throws Error - Always throws in M0 (not yet implemented)
+ * @returns Terminal instance
  *
  * @example
  * ```typescript
@@ -72,6 +68,7 @@ import type { Terminal, TerminalOptions } from "./types.js";
  * const term = createTerminal({
  *   cols: 80,
  *   rows: 24,
+ *   scrollback: 10000,
  *   theme: {
  *     foreground: '#f0f0f0',
  *     background: '#1e1e1e',
@@ -79,10 +76,9 @@ import type { Terminal, TerminalOptions } from "./types.js";
  * });
  *
  * term.write('Hello, world!');
+ * term.write('\x1b[1;31mBold red text\x1b[0m\n');
  * ```
  */
-export function createTerminal(_options?: TerminalOptions): Terminal {
-	throw new Error(
-		"Terminal constructor not yet implemented — see docs/ROADMAP.md for implementation status",
-	);
+export function createTerminal(options?: TerminalOptions): Terminal {
+	return new TerminalImpl(options);
 }
