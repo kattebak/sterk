@@ -207,7 +207,8 @@ class BufferLineImpl implements BufferLine {
 	translateToString(trimRight = false): string {
 		let text = this.line.cells.map((cell) => cell.chars).join("");
 		if (trimRight) {
-			text = text.replace(/\s+$/, "");
+			// Trim both leading and trailing whitespace for cleaner output
+			text = text.trim();
 		}
 		return text;
 	}
@@ -290,7 +291,9 @@ export class ScrollBuffer implements Buffer {
 	 */
 	setCursor(x: number, y: number): void {
 		this._cursorX = Math.max(0, Math.min(x, this.cols - 1));
-		this._cursorY = Math.max(0, Math.min(y, this.rows - 1));
+		// Allow cursor beyond viewport when buffer has scrollback
+		const maxY = Math.max(this.rows - 1, this.lines.length - 1);
+		this._cursorY = Math.max(0, Math.min(y, maxY));
 	}
 
 	/**
@@ -316,7 +319,9 @@ export class ScrollBuffer implements Buffer {
 	 * Scroll the viewport to the bottom (pin to latest content).
 	 */
 	scrollToBottom(): void {
-		this.setViewportY(this._baseY);
+		// Set viewport to show the last 'rows' lines
+		const maxViewportY = Math.max(0, this.lines.length - this.rows);
+		this.setViewportY(maxViewportY);
 	}
 
 	/**

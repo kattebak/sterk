@@ -234,7 +234,9 @@ describe("ScrollBuffer", () => {
 		it("scrolls to bottom", () => {
 			buffer.setViewportY(10);
 			buffer.scrollToBottom();
-			expect(buffer.viewportY).toBe(buffer.baseY);
+			// Should show the last 'rows' lines (most recent content)
+			const expectedViewportY = Math.max(0, buffer.length - 24);
+			expect(buffer.viewportY).toBe(expectedViewportY);
 		});
 	});
 

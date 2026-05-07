@@ -105,14 +105,19 @@ describe("@kattebak/sterk", () => {
 			expect(typeof createTerminal).toBe("function");
 		});
 
-		it("throws with a clear error message", () => {
-			expect(() => createTerminal()).toThrow(
-				/not yet implemented.*ROADMAP\.md/i,
-			);
+		it("creates a terminal instance", () => {
+			const term = createTerminal();
+			expect(term).toBeDefined();
+			expect(term.cols).toBe(80); // default
+			expect(term.rows).toBe(24); // default
+			term.dispose();
 		});
 
 		it("accepts optional TerminalOptions", () => {
-			expect(() => createTerminal({ cols: 80, rows: 24 })).toThrow();
+			const term = createTerminal({ cols: 120, rows: 35 });
+			expect(term.cols).toBe(120);
+			expect(term.rows).toBe(35);
+			term.dispose();
 		});
 
 		it("return type is Terminal", () => {
@@ -120,24 +125,24 @@ describe("@kattebak/sterk", () => {
 		});
 
 		it("accepts theme configuration", () => {
-			expect(() =>
-				createTerminal({
-					theme: {
-						foreground: "#f0f0f0",
-						background: "#1e1e1e",
-						palette: [
-							"#000000",
-							"#cd0000",
-							"#00cd00",
-							"#cdcd00",
-							"#0000ee",
-							"#cd00cd",
-							"#00cdcd",
-							"#e5e5e5",
-						],
-					},
-				}),
-			).toThrow();
+			const term = createTerminal({
+				theme: {
+					foreground: "#f0f0f0",
+					background: "#1e1e1e",
+					palette: [
+						"#000000",
+						"#cd0000",
+						"#00cd00",
+						"#cdcd00",
+						"#0000ee",
+						"#cd00cd",
+						"#00cdcd",
+						"#e5e5e5",
+					],
+				},
+			});
+			expect(term).toBeDefined();
+			term.dispose();
 		});
 	});
 
