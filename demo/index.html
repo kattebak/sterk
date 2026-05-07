@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Sterk — Terminal Emulator Demo</title>
+		<style>
+			* {
+				box-sizing: border-box;
+			}
+
+			body {
+				margin: 0;
+				padding: 20px;
+				font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+					"Helvetica Neue", Arial, sans-serif;
+				background: #1e1e1e;
+				color: #d4d4d4;
+			}
+
+			.container {
+				max-width: 1200px;
+				margin: 0 auto;
+			}
+
+			h1 {
+				margin: 0 0 10px;
+				font-size: 2rem;
+				font-weight: 600;
+			}
+
+			p {
+				margin: 0 0 20px;
+				color: #9d9d9d;
+			}
+
+			#terminal {
+				border: 1px solid #3c3c3c;
+				border-radius: 4px;
+				overflow: hidden;
+				background: #1e1e1e;
+				margin-bottom: 20px;
+			}
+
+			.controls {
+				display: flex;
+				gap: 10px;
+				margin-bottom: 20px;
+			}
+
+			button {
+				padding: 8px 16px;
+				border: 1px solid #3c3c3c;
+				border-radius: 4px;
+				background: #2d2d30;
+				color: #d4d4d4;
+				cursor: pointer;
+				font-size: 14px;
+			}
+
+			button:hover {
+				background: #3e3e42;
+			}
+
+			button:active {
+				background: #1e1e1e;
+			}
+
+			.theme-buttons {
+				display: flex;
+				gap: 10px;
+			}
+
+			footer {
+				margin-top: 40px;
+				padding-top: 20px;
+				border-top: 1px solid #3c3c3c;
+				text-align: center;
+				color: #9d9d9d;
+				font-size: 14px;
+			}
+
+			footer a {
+				color: #569cd6;
+				text-decoration: none;
+			}
+
+			footer a:hover {
+				text-decoration: underline;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<h1>@kattebak/sterk</h1>
+			<p>
+				Touch-friendly terminal emulator — Ace renderer + clean-room VT core.
+				OSC 133 first-class.
+			</p>
+
+			<div class="controls">
+				<button type="button" id="demo-ls">ls --color</button>
+				<button type="button" id="demo-prompt">OSC 133 Example</button>
+				<button type="button" id="demo-alt">Alternate Screen (vim)</button>
+				<button type="button" id="clear">Clear</button>
+			</div>
+
+			<div class="theme-buttons">
+				<button type="button" id="theme-dark">Dark Theme</button>
+				<button type="button" id="theme-light">Light Theme</button>
+				<button type="button" id="theme-monokai">Monokai</button>
+			</div>
+
+			<div id="terminal"></div>
+
+			<footer>
+				<p>
+					<a href="https://github.com/kattebak/sterk" target="_blank">GitHub</a>
+					| <a href="https://www.npmjs.com/package/@kattebak/sterk" target="_blank">npm</a>
+					| MIT License
+				</p>
+			</footer>
+		</div>
+
+		<!-- Load sterk from dist (assumes you've run npm run build) -->
+		<script type="module">
+			import { createTerminal } from '../dist/index.js';
+
+			// Create terminal
+			const term = createTerminal({
+				cols: 100,
+				rows: 24,
+				theme: {
+					foreground: '#d4d4d4',
+					background: '#1e1e1e',
+				},
+			});
+
+			// Attach to DOM
+			const container = document.getElementById('terminal');
+			term.open(container);
+
+			// Welcome banner
+			term.write('\x1b[1;36m╔═══════════════════════════════════════════════════════╗\x1b[0m\r\n');
+			term.write('\x1b[1;36m║\x1b[0m  \x1b[1mWelcome to @kattebak/sterk!\x1b[0m                     \x1b[1;36m║\x1b[0m\r\n');
+			term.write('\x1b[1;36m║\x1b[0m  Touch-friendly terminal for the web              \x1b[1;36m║\x1b[0m\r\n');
+			term.write('\x1b[1;36m╚═══════════════════════════════════════════════════════╝\x1b[0m\r\n\r\n');
+			term.write('Try the buttons above to see different features.\r\n');
+			term.write('Type anything to test input handling.\r\n\r\n');
+			term.write('\x1b[32m$\x1b[0m ');
+
+			// OSC 133 handler
+			let lastPromptY = 0;
+			term.parser.registerOscHandler(133, (data) => {
+				const kind = data.charAt(0);
+				if (kind === 'A') {
+					lastPromptY = term.buffer.active.cursorY;
+					console.log('OSC 133 A: Prompt start at line', lastPromptY);
+				} else if (kind === 'B') {
+					console.log('OSC 133 B: Prompt end');
+				} else if (kind === 'C') {
+					console.log('OSC 133 C: Command start');
+				} else if (kind === 'D') {
+					console.log('OSC 133 D: Command end');
+				}
+				return false;
+			});
+
+			// Input handler
+			term.onData((data) => {
+				// Echo input back to terminal
+				for (const char of data) {
+					if (char === '\r') {
+						term.write('\r\n\x1b[32m$\x1b[0m ');
+					} else {
+						term.write(char);
+					}
+				}
+			});
+
+			// Demo: ls --color
+			document.getElementById('demo-ls').addEventListener('click', () => {
+				term.write('\r\n\x1b[1;34mfile1.txt\x1b[0m  \x1b[1;34mfile2.txt\x1b[0m  \x1b[1;32mscript.sh\x1b[0m  \x1b[1;35mdocs/\x1b[0m\r\n');
+				term.write('\x1b[32m$\x1b[0m ');
+			});
+
+			// Demo: OSC 133
+			document.getElementById('demo-prompt').addEventListener('click', () => {
+				term.write('\r\n');
+				// OSC 133 A - prompt start
+				term.write('\x1b]133;A\x07');
+				term.write('\x1b[32m$\x1b[0m ');
+				// OSC 133 B - prompt end
+				term.write('\x1b]133;B\x07');
+				term.write('echo "Hello from OSC 133"');
+				// OSC 133 C - command start
+				term.write('\x1b]133;C\x07');
+				term.write('\r\nHello from OSC 133\r\n');
+				// OSC 133 D - command end
+				term.write('\x1b]133;D;0\x07');
+				term.write('\x1b[32m$\x1b[0m ');
+			});
+
+			// Demo: Alternate screen (vim)
+			document.getElementById('demo-alt').addEventListener('click', () => {
+				// Enter alternate screen (DECSET 1049)
+				term.write('\x1b[?1049h');
+				term.write('\x1b[2J\x1b[H'); // Clear and home
+
+				// Simulate vim interface
+				term.write('\x1b[7m~ VIM - Demo                                                 \x1b[0m\r\n');
+				term.write('~\r\n');
+				term.write('~ # README\r\n');
+				term.write('~\r\n');
+				term.write('~ This is a demo of the alternate screen buffer.\r\n');
+				term.write('~ In a real terminal, vim uses this to show files\r\n');
+				term.write('~ without disturbing your shell history.\r\n');
+				term.write('~\r\n');
+				term.write('~ Press the "Clear" button to exit back to normal screen.\r\n');
+				term.write('~\r\n');
+				for (let i = 0; i < 12; i++) {
+					term.write('~\r\n');
+				}
+				term.write('\x1b[7m[No Name]                                          0,0-1  All\x1b[0m');
+
+				// Override clear button to exit alt screen
+				const clearBtn = document.getElementById('clear');
+				const originalHandler = clearBtn.onclick;
+				clearBtn.onclick = () => {
+					// Exit alternate screen (DECRST 1049)
+					term.write('\x1b[?1049l');
+					clearBtn.onclick = originalHandler;
+				};
+			});
+
+			// Clear terminal
+			document.getElementById('clear').addEventListener('click', () => {
+				term.clear();
+				term.write('\x1b[32m$\x1b[0m ');
+			});
+
+			// Theme switching
+			const themes = {
+				dark: {
+					foreground: '#d4d4d4',
+					background: '#1e1e1e',
+					palette: [
+						'#000000', '#cd3131', '#0dbc79', '#e5e510',
+						'#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5',
+						'#666666', '#f14c4c', '#23d18b', '#f5f543',
+						'#3b8eea', '#d670d6', '#29b8db', '#ffffff',
+					],
+				},
+				light: {
+					foreground: '#000000',
+					background: '#ffffff',
+					palette: [
+						'#000000', '#cd3131', '#00bc00', '#949800',
+						'#0451a5', '#bc05bc', '#0598bc', '#555555',
+						'#666666', '#cd3131', '#14ce14', '#b5ba00',
+						'#0451a5', '#bc05bc', '#0598bc', '#a5a5a5',
+					],
+				},
+				monokai: {
+					foreground: '#f8f8f2',
+					background: '#272822',
+					palette: [
+						'#272822', '#f92672', '#a6e22e', '#f4bf75',
+						'#66d9ef', '#ae81ff', '#a1efe4', '#f8f8f2',
+						'#75715e', '#f92672', '#a6e22e', '#f4bf75',
+						'#66d9ef', '#ae81ff', '#a1efe4', '#f9f8f5',
+					],
+				},
+			};
+
+			document.getElementById('theme-dark').addEventListener('click', () => {
+				term.options.theme = themes.dark;
+				document.body.style.background = themes.dark.background;
+				document.body.style.color = themes.dark.foreground;
+			});
+
+			document.getElementById('theme-light').addEventListener('click', () => {
+				term.options.theme = themes.light;
+				document.body.style.background = themes.light.background;
+				document.body.style.color = themes.light.foreground;
+			});
+
+			document.getElementById('theme-monokai').addEventListener('click', () => {
+				term.options.theme = themes.monokai;
+				document.body.style.background = themes.monokai.background;
+				document.body.style.color = themes.monokai.foreground;
+			});
+		</script>
+	</body>
+</html>
