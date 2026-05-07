@@ -443,25 +443,125 @@ export class ScrollBuffer implements Buffer {
 }
 
 /**
+ * Saved cursor state for DECSC/DECRC and alternate screen switching
+ */
+export interface SavedCursor {
+	cursorX: number;
+	cursorY: number;
+	attrs: CellAttributes;
+}
+
+/**
  * BufferNamespace implementation.
- * In M1, we only support a single normal buffer (no alternate screen buffer yet).
+ * Supports normal and alternate screen buffers (M4).
  */
 export class BufferNamespaceImpl implements BufferNamespace {
 	private normalBuffer: ScrollBuffer;
+	private alternateBuffer: ScrollBuffer;
+	private activeBuffer: ScrollBuffer;
+	private savedCursor: SavedCursor | null = null;
 
 	constructor(cols: number, rows: number, scrollback: number) {
+		// Normal buffer has scrollback
 		this.normalBuffer = new ScrollBuffer(cols, rows, scrollback);
+		// Alternate buffer has NO scrollback (standard terminal behavior)
+		this.alternateBuffer = new ScrollBuffer(cols, rows, 0);
+		this.activeBuffer = this.normalBuffer;
 	}
 
 	get active(): Buffer {
+		return this.activeBuffer;
+	}
+
+	/**
+	 * Get the normal buffer (for internal use).
+	 * @internal
+	 */
+	get normal(): ScrollBuffer {
 		return this.normalBuffer;
 	}
 
 	/**
-	 * Get direct access to the normal buffer (for internal use).
+	 * Get the alternate buffer (for internal use).
+	 * @internal
+	 */
+	get alternate(): ScrollBuffer {
+		return this.alternateBuffer;
+	}
+
+	/**
+	 * Check if alternate screen is active
+	 * @internal
+	 */
+	isAlternate(): boolean {
+		return this.activeBuffer === this.alternateBuffer;
+	}
+
+	/**
+	 * Switch to alternate screen buffer
+	 * @internal
+	 */
+	switchToAlternate(): void {
+		this.activeBuffer = this.alternateBuffer;
+	}
+
+	/**
+	 * Switch to normal screen buffer
+	 * @internal
+	 */
+	switchToNormal(): void {
+		this.activeBuffer = this.normalBuffer;
+	}
+
+	/**
+	 * Save cursor position and attributes (DECSC)
+	 * @internal
+	 */
+	saveCursor(attrs: CellAttributes): void {
+		this.savedCursor = {
+			cursorX: this.activeBuffer.cursorX,
+			cursorY: this.activeBuffer.cursorY,
+			attrs: { ...attrs },
+		};
+	}
+
+	/**
+	 * Restore cursor position and attributes (DECRC)
+	 * @internal
+	 */
+	restoreCursor(attrs: CellAttributes): void {
+		if (this.savedCursor) {
+			this.activeBuffer.setCursor(
+				this.savedCursor.cursorX,
+				this.savedCursor.cursorY,
+			);
+			// Restore SGR attributes
+			attrs.fgMode = this.savedCursor.attrs.fgMode;
+			attrs.fgColor = this.savedCursor.attrs.fgColor;
+			attrs.bgMode = this.savedCursor.attrs.bgMode;
+			attrs.bgColor = this.savedCursor.attrs.bgColor;
+			attrs.bold = this.savedCursor.attrs.bold;
+			attrs.italic = this.savedCursor.attrs.italic;
+			attrs.underline = this.savedCursor.attrs.underline;
+			attrs.inverse = this.savedCursor.attrs.inverse;
+			attrs.dim = this.savedCursor.attrs.dim;
+		}
+	}
+
+	/**
+	 * Get direct access to the active scroll buffer (for internal use).
 	 * @internal
 	 */
 	_getScrollBuffer(): ScrollBuffer {
-		return this.normalBuffer;
+		return this.activeBuffer;
+	}
+
+	/**
+	 * Resize both buffers
+	 * @internal
+	 */
+	resize(cols: number, rows: number): void {
+		this.normalBuffer.resize(cols, rows);
+		this.alternateBuffer.resize(cols, rows);
 	}
 }
