@@ -25,6 +25,31 @@ export type {
 	Theme,
 } from "./types.js";
 
+// ── M1: Color Palette Utilities ─────────────────────────────────────
+
+export {
+	ANSI_COLORS,
+	buildPalette,
+	hexToPalette,
+	hexToRgb,
+	type PaletteIndex,
+	paletteToHex,
+	paletteToRgb,
+	type RGB,
+	rgbToHex,
+	rgbToPalette,
+} from "./util/colors.js";
+
+// ── M1: EventEmitter Shim ───────────────────────────────────────────
+
+export { EventEmitter } from "./util/event_emitter.js";
+
+// ── M1: Scrollback Buffer (internal, not exported) ──────────────────
+// The ScrollBuffer and related classes are internal implementation details.
+// They will be used by the Terminal implementation but are not part of the
+// public API surface. Consumers interact with buffers via the Buffer/BufferLine/
+// BufferCell interfaces defined in types.ts.
+
 // ── Constructor Stub ─────────────────────────────────────────────────
 
 import type { Terminal, TerminalOptions } from "./types.js";

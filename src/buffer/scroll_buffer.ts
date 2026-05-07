@@ -1,0 +1,462 @@
+/**
+ * Scrollback buffer implementation with ring buffer and line wrapping.
+ *
+ * This is a clean-room implementation designed to satisfy the Buffer/BufferLine/BufferCell
+ * interfaces defined in src/types.ts. It provides a ring buffer for storing terminal lines
+ * with support for line wrapping and reflow on resize.
+ *
+ * Design notes:
+ * - Lines are stored in a circular buffer to efficiently handle scrollback
+ * - Each cell stores character content and SGR attributes (colors, bold, italic, etc.)
+ * - Line wrapping is tracked via the isWrapped flag on BufferLine
+ * - Reflow on resize is deferred to M2 (VT core will need to coordinate this)
+ */
+
+import type {
+	Buffer,
+	BufferCell,
+	BufferLine,
+	BufferNamespace,
+} from "../types.js";
+
+/**
+ * SGR (Select Graphic Rendition) attributes for a cell.
+ * Stores colors and text style flags.
+ */
+export interface CellAttributes {
+	/** Foreground color mode: 0 = default, 1 = palette (0-255), 2 = RGB (24-bit) */
+	fgMode: 0 | 1 | 2;
+	/** Foreground color value: -1 for default, 0-255 for palette, 0xRRGGBB for RGB */
+	fgColor: number;
+	/** Background color mode: 0 = default, 1 = palette (0-255), 2 = RGB (24-bit) */
+	bgMode: 0 | 1 | 2;
+	/** Background color value: -1 for default, 0-255 for palette, 0xRRGGBB for RGB */
+	bgColor: number;
+	/** Bold flag (SGR 1) */
+	bold: boolean;
+	/** Italic flag (SGR 3) */
+	italic: boolean;
+	/** Underline flag (SGR 4) */
+	underline: boolean;
+	/** Inverse/reverse video flag (SGR 7) */
+	inverse: boolean;
+	/** Dim flag (SGR 2) */
+	dim: boolean;
+}
+
+/**
+ * Default cell attributes (all flags off, default colors).
+ */
+export const DEFAULT_CELL_ATTRIBUTES: CellAttributes = {
+	fgMode: 0,
+	fgColor: -1,
+	bgMode: 0,
+	bgColor: -1,
+	bold: false,
+	italic: false,
+	underline: false,
+	inverse: false,
+	dim: false,
+};
+
+/**
+ * Cell data structure.
+ * Stores character content and SGR attributes.
+ */
+export interface Cell {
+	/** Character content (may be multi-char for wide glyphs) */
+	chars: string;
+	/** Unicode code point of first character */
+	code: number;
+	/** SGR attributes */
+	attrs: CellAttributes;
+}
+
+/**
+ * Create a blank cell with default attributes.
+ */
+export function createBlankCell(): Cell {
+	return {
+		chars: " ",
+		code: 32,
+		attrs: { ...DEFAULT_CELL_ATTRIBUTES },
+	};
+}
+
+/**
+ * Line data structure.
+ * Stores an array of cells and line-level metadata.
+ */
+export interface Line {
+	/** Array of cells (length = cols) */
+	cells: Cell[];
+	/** True if this line is wrapped from the previous line */
+	isWrapped: boolean;
+}
+
+/**
+ * Create a blank line with the specified number of columns.
+ */
+export function createBlankLine(cols: number): Line {
+	const cells: Cell[] = [];
+	for (let i = 0; i < cols; i++) {
+		cells.push(createBlankCell());
+	}
+	return {
+		cells,
+		isWrapped: false,
+	};
+}
+
+/**
+ * Implementation of BufferCell interface.
+ */
+class BufferCellImpl implements BufferCell {
+	constructor(private cell: Cell) {}
+
+	getChars(): string {
+		return this.cell.chars;
+	}
+
+	getCode(): number {
+		return this.cell.code;
+	}
+
+	// Foreground color accessors
+	isFgDefault(): boolean {
+		return this.cell.attrs.fgMode === 0;
+	}
+
+	isFgPalette(): boolean {
+		return this.cell.attrs.fgMode === 1;
+	}
+
+	isFgRGB(): boolean {
+		return this.cell.attrs.fgMode === 2;
+	}
+
+	getFgColor(): number {
+		return this.cell.attrs.fgColor;
+	}
+
+	getFgColorMode(): number {
+		return this.cell.attrs.fgMode === 0
+			? 0x000
+			: this.cell.attrs.fgMode === 1
+				? 0x100
+				: 0x200;
+	}
+
+	// Background color accessors
+	isBgDefault(): boolean {
+		return this.cell.attrs.bgMode === 0;
+	}
+
+	isBgPalette(): boolean {
+		return this.cell.attrs.bgMode === 1;
+	}
+
+	isBgRGB(): boolean {
+		return this.cell.attrs.bgMode === 2;
+	}
+
+	getBgColor(): number {
+		return this.cell.attrs.bgColor;
+	}
+
+	getBgColorMode(): number {
+		return this.cell.attrs.bgMode === 0
+			? 0x000
+			: this.cell.attrs.bgMode === 1
+				? 0x100
+				: 0x200;
+	}
+
+	// Text style accessors
+	isBold(): boolean {
+		return this.cell.attrs.bold;
+	}
+
+	isItalic(): boolean {
+		return this.cell.attrs.italic;
+	}
+
+	isUnderline(): boolean {
+		return this.cell.attrs.underline;
+	}
+
+	isInverse(): boolean {
+		return this.cell.attrs.inverse;
+	}
+
+	isDim(): boolean {
+		return this.cell.attrs.dim;
+	}
+}
+
+/**
+ * Implementation of BufferLine interface.
+ */
+class BufferLineImpl implements BufferLine {
+	constructor(private line: Line) {}
+
+	get isWrapped(): boolean {
+		return this.line.isWrapped;
+	}
+
+	translateToString(trimRight = false): string {
+		let text = this.line.cells.map((cell) => cell.chars).join("");
+		if (trimRight) {
+			text = text.replace(/\s+$/, "");
+		}
+		return text;
+	}
+
+	getCell(x: number): BufferCell {
+		const cell = this.line.cells[x];
+		return cell
+			? new BufferCellImpl(cell)
+			: new BufferCellImpl(createBlankCell());
+	}
+}
+
+/**
+ * Scrollback buffer implementation.
+ * Uses a ring buffer to efficiently store terminal lines with scrollback.
+ */
+export class ScrollBuffer implements Buffer {
+	private lines: Line[] = [];
+	private maxLines: number;
+	private cols: number;
+	private rows: number;
+
+	/** Absolute row index of the first scrollback line */
+	private _baseY = 0;
+	/** Absolute row index of the topmost visible row */
+	private _viewportY = 0;
+	/** Cursor X position (column) */
+	private _cursorX = 0;
+	/** Cursor Y position (row, relative to viewport) */
+	private _cursorY = 0;
+
+	constructor(cols: number, rows: number, scrollback: number) {
+		this.cols = cols;
+		this.rows = rows;
+		this.maxLines = rows + scrollback;
+
+		// Initialize with blank lines
+		for (let i = 0; i < rows; i++) {
+			this.lines.push(createBlankLine(cols));
+		}
+	}
+
+	// ── Buffer interface implementation ──────────────────────────────
+
+	get length(): number {
+		return this.lines.length;
+	}
+
+	get cursorX(): number {
+		return this._cursorX;
+	}
+
+	get cursorY(): number {
+		return this._cursorY;
+	}
+
+	get baseY(): number {
+		return this._baseY;
+	}
+
+	get viewportY(): number {
+		return this._viewportY;
+	}
+
+	getLine(y: number): BufferLine | null {
+		if (y < 0 || y >= this.lines.length) {
+			return null;
+		}
+		const line = this.lines[y];
+		return line ? new BufferLineImpl(line) : null;
+	}
+
+	// ── Buffer mutation methods (internal, used by VT parser) ───────
+
+	/**
+	 * Set cursor position (for VT parser to call).
+	 *
+	 * @param x - Column index (0-based)
+	 * @param y - Row index (0-based, relative to viewport)
+	 */
+	setCursor(x: number, y: number): void {
+		this._cursorX = Math.max(0, Math.min(x, this.cols - 1));
+		this._cursorY = Math.max(0, Math.min(y, this.rows - 1));
+	}
+
+	/**
+	 * Set viewport Y (scroll position).
+	 *
+	 * @param y - Absolute row index of the topmost visible row
+	 */
+	setViewportY(y: number): void {
+		const maxViewportY = Math.max(0, this.lines.length - this.rows);
+		this._viewportY = Math.max(0, Math.min(y, maxViewportY));
+	}
+
+	/**
+	 * Scroll the viewport by a number of lines.
+	 *
+	 * @param delta - Number of lines to scroll (positive = down, negative = up)
+	 */
+	scrollViewport(delta: number): void {
+		this.setViewportY(this._viewportY + delta);
+	}
+
+	/**
+	 * Scroll the viewport to the bottom (pin to latest content).
+	 */
+	scrollToBottom(): void {
+		this.setViewportY(this._baseY);
+	}
+
+	/**
+	 * Insert a new line at the bottom of the buffer.
+	 * This is typically called when scrolling content up (e.g., newline at bottom row).
+	 *
+	 * @param wrapped - Whether this line is wrapped from the previous line
+	 */
+	insertLine(wrapped = false): void {
+		const line = createBlankLine(this.cols);
+		line.isWrapped = wrapped;
+
+		// If we're at capacity, remove the oldest line
+		if (this.lines.length >= this.maxLines) {
+			this.lines.shift();
+			this._baseY++;
+		}
+
+		// Append the new line at the bottom
+		this.lines.push(line);
+
+		// Keep viewport pinned to bottom if it was already there
+		if (this._viewportY === this._baseY) {
+			this.scrollToBottom();
+		}
+	}
+
+	/**
+	 * Write a character at the cursor position with the given attributes.
+	 *
+	 * @param char - Character to write
+	 * @param code - Unicode code point
+	 * @param attrs - SGR attributes
+	 */
+	writeCell(char: string, code: number, attrs: CellAttributes): void {
+		const absoluteY = this._baseY + this._cursorY;
+		const relativeY = absoluteY - this._baseY;
+
+		// Ensure line exists
+		while (this.lines.length <= relativeY) {
+			this.lines.push(createBlankLine(this.cols));
+		}
+
+		const line = this.lines[relativeY];
+		if (!line) return;
+
+		// Ensure cells array is long enough
+		while (line.cells.length <= this._cursorX) {
+			line.cells.push(createBlankCell());
+		}
+
+		// Write the cell
+		const cell = line.cells[this._cursorX];
+		if (cell) {
+			cell.chars = char;
+			cell.code = code;
+			cell.attrs = { ...attrs };
+		}
+
+		// Advance cursor
+		this._cursorX++;
+		if (this._cursorX >= this.cols) {
+			this._cursorX = 0;
+			this._cursorY = Math.min(this._cursorY + 1, this.rows - 1);
+		}
+	}
+
+	/**
+	 * Clear the buffer (remove all lines and reset cursor).
+	 */
+	clear(): void {
+		this.lines = [];
+		for (let i = 0; i < this.rows; i++) {
+			this.lines.push(createBlankLine(this.cols));
+		}
+		this._baseY = 0;
+		this._viewportY = 0;
+		this._cursorX = 0;
+		this._cursorY = 0;
+	}
+
+	/**
+	 * Resize the buffer to new dimensions.
+	 * This is a simplified resize that doesn't reflow content (reflow deferred to M2).
+	 *
+	 * @param cols - New column count
+	 * @param rows - New row count
+	 */
+	resize(cols: number, rows: number): void {
+		this.cols = cols;
+		this.rows = rows;
+
+		// Resize existing lines (truncate or pad)
+		for (const line of this.lines) {
+			if (line.cells.length > cols) {
+				line.cells.length = cols;
+			} else {
+				while (line.cells.length < cols) {
+					line.cells.push(createBlankCell());
+				}
+			}
+		}
+
+		// Clamp cursor position
+		this._cursorX = Math.min(this._cursorX, cols - 1);
+		this._cursorY = Math.min(this._cursorY, rows - 1);
+
+		// Update viewport
+		this.setViewportY(this._viewportY);
+	}
+
+	/**
+	 * Get direct access to internal line data (for testing/debugging).
+	 * @internal
+	 */
+	_getInternalLine(y: number): Line | undefined {
+		return this.lines[y];
+	}
+}
+
+/**
+ * BufferNamespace implementation.
+ * In M1, we only support a single normal buffer (no alternate screen buffer yet).
+ */
+export class BufferNamespaceImpl implements BufferNamespace {
+	private normalBuffer: ScrollBuffer;
+
+	constructor(cols: number, rows: number, scrollback: number) {
+		this.normalBuffer = new ScrollBuffer(cols, rows, scrollback);
+	}
+
+	get active(): Buffer {
+		return this.normalBuffer;
+	}
+
+	/**
+	 * Get direct access to the normal buffer (for internal use).
+	 * @internal
+	 */
+	_getScrollBuffer(): ScrollBuffer {
+		return this.normalBuffer;
+	}
+}
