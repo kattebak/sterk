@@ -13,6 +13,12 @@ import {
 } from "./buffer/scroll_buffer.js";
 import { applySgr } from "./parser/sgr.js";
 import { VtParser } from "./parser/vt_parser.js";
+import { AceRenderer } from "./renderer/ace_renderer.js";
+import { InputHandler } from "./renderer/input.js";
+import type { Link } from "./renderer/links.js";
+import { LinkDetector } from "./renderer/links.js";
+import { MouseHandler } from "./renderer/mouse.js";
+import { applyTheme } from "./renderer/theme.js";
 import type {
 	BufferNamespace,
 	Disposable,
@@ -44,6 +50,11 @@ export class TerminalImpl implements Terminal {
 	private parserImpl: ParserImpl;
 	private emitter = new EventEmitter();
 	private _options: Required<TerminalOptions>;
+	// Renderer components (optional, for DOM mode)
+	private aceRenderer: AceRenderer | null = null;
+	private inputHandler: InputHandler | null = null;
+	private mouseHandler: MouseHandler | null = null;
+	private linkDetector: LinkDetector | null = null;
 
 	constructor(options?: TerminalOptions) {
 		// Default options
@@ -119,6 +130,9 @@ export class TerminalImpl implements Terminal {
 
 	write(data: string | Uint8Array, callback?: () => void): void {
 		this.vtParser.write(data);
+		if (this.aceRenderer) {
+			this.aceRenderer.scheduleUpdate();
+		}
 		this.emitter.emit("write-parsed");
 		if (callback) {
 			callback();
@@ -129,6 +143,9 @@ export class TerminalImpl implements Terminal {
 		this._options.cols = cols;
 		this._options.rows = rows;
 		this.scrollBuffer.resize(cols, rows);
+		if (this.aceRenderer) {
+			this.aceRenderer.resize(cols, rows);
+		}
 	}
 
 	clear(): void {
@@ -138,10 +155,16 @@ export class TerminalImpl implements Terminal {
 
 	scrollLines(lines: number): void {
 		this.scrollBuffer.scrollViewport(lines);
+		if (this.aceRenderer) {
+			this.aceRenderer.scheduleUpdate();
+		}
 	}
 
 	scrollToBottom(): void {
 		this.scrollBuffer.scrollToBottom();
+		if (this.aceRenderer) {
+			this.aceRenderer.scheduleUpdate();
+		}
 	}
 
 	onWriteParsed(callback: () => void): Disposable {
@@ -173,12 +196,84 @@ export class TerminalImpl implements Terminal {
 		this.emitter.emit("data", str);
 	}
 
+	open(container: HTMLElement): void {
+		if (this.aceRenderer) {
+			throw new Error("Terminal is already opened");
+		}
+
+		// Create renderer
+		this.aceRenderer = new AceRenderer(
+			container,
+			this.scrollBuffer,
+			this._options.fontSize,
+		);
+
+		// Apply theme
+		applyTheme(this._options.theme);
+
+		// Create input handler
+		const editorElement = this.aceRenderer.getElement();
+		this.inputHandler = new InputHandler(editorElement);
+		this.inputHandler.onData((data) => {
+			this.emitter.emit("data", data);
+		});
+
+		// Create mouse handler
+		this.mouseHandler = new MouseHandler(editorElement, () =>
+			this.getCellMetrics(),
+		);
+		this.mouseHandler.onData((data) => {
+			this.emitter.emit("data", data);
+		});
+		this.mouseHandler.onScroll((lines) => {
+			this.scrollLines(lines);
+		});
+
+		// Create link detector
+		this.linkDetector = new LinkDetector(
+			editorElement,
+			() => this.buffer.active,
+			() => this.getCellMetrics(),
+		);
+		this.linkDetector.onHover((link: Link | null) => {
+			this.emitter.emit("link-hover", link);
+		});
+		this.linkDetector.onClick((link: Link) => {
+			this.emitter.emit("link-click", link);
+		});
+
+		// Initial render
+		this.aceRenderer.scheduleUpdate();
+	}
+
+	get renderer(): unknown {
+		return this.aceRenderer ?? undefined;
+	}
+
 	getCellMetrics(): { width: number; height: number } | null {
-		// Not implemented in M2 (no renderer yet)
+		if (this.aceRenderer) {
+			return this.aceRenderer.getCellMetrics();
+		}
 		return null;
 	}
 
 	dispose(): void {
+		if (this.aceRenderer) {
+			this.aceRenderer.dispose();
+			this.aceRenderer = null;
+		}
+		if (this.inputHandler) {
+			this.inputHandler.dispose();
+			this.inputHandler = null;
+		}
+		if (this.mouseHandler) {
+			this.mouseHandler.dispose();
+			this.mouseHandler = null;
+		}
+		if (this.linkDetector) {
+			this.linkDetector.dispose();
+			this.linkDetector = null;
+		}
 		this.emitter.removeAllListeners();
 	}
 
