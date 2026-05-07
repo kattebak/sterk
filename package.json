@@ -30,7 +30,8 @@
 	"files": [
 		"dist",
 		"README.md",
-		"LICENSE"
+		"LICENSE",
+		"CHANGELOG.md"
 	],
 	"exports": {
 		".": {
@@ -48,6 +49,8 @@
 		"format": "biome format --write",
 		"fix": "biome check --write",
 		"typecheck": "tsc --noEmit",
+		"size": "node scripts/check-size.js",
+		"demo": "node scripts/serve-demo.js",
 		"check": "npm run lint && npm run typecheck && npm test",
 		"prepublishOnly": "npm run build"
 	},
