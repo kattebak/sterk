@@ -56,8 +56,6 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.7",
-		"@semantic-release/changelog": "^6.0.3",
-		"@semantic-release/git": "^10.0.1",
 		"@types/ace": "^0.0.52",
 		"@types/node": "^22.18.11",
 		"happy-dom": "^20.9.0",
