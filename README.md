@@ -3,23 +3,19 @@
 [![Node.js CI](https://github.com/kattebak/sterk/actions/workflows/node.js.yml/badge.svg)](https://github.com/kattebak/sterk/actions/workflows/node.js.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Sterk is a touch-friendly terminal emulator for the web. It pairs Ace's mature text-rendering engine with a clean-room VT core, and treats shell-integration (OSC 133) as a first-class primitive rather than an extension.
+Sterk is a terminal emulator for the web, built with ❤️ on top of [Ace](https://ace.c9.io/). It pairs Ace's mature text-rendering engine with a clean-room VT core, and treats shell-integration (OSC 133) as a first-class primitive rather than an extension.
+
+Touch-friendly. Mobile-first. MIT.
 
 ## Status
 
-**Milestone 0 (M0): API Contract Defined ✅**
+- ✅ **M0** — Public API contract (`src/types.ts`)
+- ✅ **M1** — Foundation utilities (256-color palette, scrollback buffer, EventEmitter shim)
+- ✅ **M2** — Clean-room VT core (Paul Williams parser, SGR, OSC 133, `Terminal` factory)
+- 🚧 **M3** — Ace renderer glue (input, mouse, links, theme, DOM)
+- ⏳ **M4** — Polish, docs, demo page, 1.0 release
 
-The public API surface is documented in `src/types.ts`. The constructor stub (`createTerminal()`) is available for type-checking but throws "not implemented" when called.
-
-**Next:** M1 (Non-Encumbered Lift) — extract clean components from c9/aceterm with proper attribution.
-
-See [docs/ROADMAP.md](./docs/ROADMAP.md) for full implementation roadmap.
-
-## Reference Consumer
-
-**mobux** (https://github.com/mvhenten/mobux) — Touch-friendly tmux web UI. The API contract in this repo is derived from mobux's existing `TerminalCore` facade. Mobux's smoke tests define the acceptance criteria for sterk.
-
-See [docs/INTEGRATION.md](./docs/INTEGRATION.md) for the detailed integration plan.
+See [docs/ROADMAP.md](./docs/ROADMAP.md).
 
 ## Installation
 
@@ -27,7 +23,14 @@ See [docs/INTEGRATION.md](./docs/INTEGRATION.md) for the detailed integration pl
 npm install @kattebak/sterk
 ```
 
-**Note:** The constructor currently throws "not implemented". This is intentional — M0 is type definitions only. Runtime implementation lands in M1+.
+`createTerminal()` currently returns a headless `Terminal` (parser + buffer + events). DOM rendering lands in M3.
+
+## Design principles
+
+- **Clean-room core.** The VT parser is written from public specs (Paul Williams' state machine, XTerm Control Sequences, ECMA-48). No code lifted from other emulators.
+- **Ace does what Ace does well.** Text layout, scrolling, theming — we don't reinvent it.
+- **OSC 133 first-class.** Shell integration (prompt markers, command boundaries) is a built-in concept, not a bolt-on.
+- **Pragmatic feature scope.** Feature parity with xterm.js is aspirational. We build what real consumers need and skip the rest.
 
 ## License
 

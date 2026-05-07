@@ -1,13 +1,7 @@
 /**
  * Type definitions for the @kattebak/sterk terminal emulator API.
  *
- * This API contract is derived from mobux's existing TerminalCore facade
- * (see mobux/web/static/terminal-core.js) and represents the minimum
- * surface that mobux requires to swap out its vendored c9/aceterm for sterk.
- *
  * Design notes:
- * - Some interfaces mirror xterm.js shapes for backward compatibility with
- *   existing mobux code. These are marked with @xterm-compat comments.
  * - OSC 133 (shell integration) is a first-class feature, not an extension.
  * - The buffer API supports read-only access to rendered cells with full
  *   attribute details (fg/bg colors, bold, italic, underline, inverse).
@@ -18,8 +12,6 @@
 /**
  * The main terminal instance. Handles VT parsing, buffer management,
  * and rendering coordination.
- *
- * @xterm-compat - Shaped to match xterm.js Terminal for mobux compatibility
  */
 export interface Terminal {
 	/**
@@ -235,8 +227,6 @@ export interface BufferLine {
 /**
  * A single character cell in the terminal buffer.
  * Exposes the character content and all SGR attributes (colors, styles).
- *
- * @xterm-compat - Matches xterm.js's Cell API shape for mobux compatibility
  */
 export interface BufferCell {
 	/**
@@ -400,11 +390,6 @@ export type OscHandler = (data: string) => boolean | undefined;
 /**
  * Terminal configuration options.
  * Passed to the Terminal constructor and live-mutable via `term.options`.
- *
- * @remarks
- * This is the minimum set of options mobux currently uses.
- * Additional xterm.js-compatible options (cursorBlink, cursorStyle, etc.)
- * may be added in the future for broader compatibility.
  */
 export interface TerminalOptions {
 	/**
@@ -443,8 +428,6 @@ export interface TerminalOptions {
 	/**
 	 * Allow users to select text with mouse/touch.
 	 * @default true
-	 *
-	 * @xterm-compat - Matches xterm.js allowSelection option
 	 */
 	allowSelection?: boolean;
 }
@@ -457,8 +440,6 @@ export interface TerminalOptions {
  * Palette colors are indexed 0-15:
  * - 0-7: standard ANSI colors (black, red, green, yellow, blue, magenta, cyan, white)
  * - 8-15: bright variants of the standard colors
- *
- * @xterm-compat - Matches xterm.js theme shape
  */
 export interface Theme {
 	/**
@@ -585,8 +566,6 @@ export interface Theme {
 /**
  * Disposable handle returned by event subscriptions.
  * Calling dispose() unregisters the handler.
- *
- * @xterm-compat - Matches xterm.js Disposable interface
  */
 export interface Disposable {
 	dispose(): void;
