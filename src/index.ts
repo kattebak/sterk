@@ -6,7 +6,7 @@
  *
  * Status: M0 (API contract defined). Implementation in progress.
  *
- * Reference consumer: mobux (https://github.com/mvhenten/mobux)
+
  */
 
 export const VERSION = "0.0.0";

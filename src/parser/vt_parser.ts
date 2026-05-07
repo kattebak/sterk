@@ -6,8 +6,7 @@
  * - https://invisible-island.net/xterm/ctlseqs/ctlseqs.html (XTerm control sequences)
  * - ECMA-48 / ANSI X3.64 standards
  *
- * This parser implements a subset of the full VT500-series parser,
- * focusing on the sequences needed by mobux:
+ * This parser implements a subset of the full VT500-series parser:
  * - C0 control codes (BEL, BS, HT, LF, VT, FF, CR, ESC)
  * - CSI sequences (cursor movement, erase, SGR)
  * - OSC sequences (titles, shell integration OSC 133)
