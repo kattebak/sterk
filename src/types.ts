@@ -113,6 +113,31 @@ export interface Terminal {
 	onData(callback: (data: string) => void): Disposable;
 
 	/**
+	 * Send input data to the terminal (for forwarding to the backend).
+	 * Most consumers will call this in response to keyboard/paste events.
+	 *
+	 * @param data - String or binary data to send
+	 */
+	send?(data: string | Uint8Array): void;
+
+	/**
+	 * Internal renderer instance (implementation-specific).
+	 * Consumers needing deep renderer access (e.g., Ace integration) can
+	 * type-assert this to their specific renderer type.
+	 *
+	 * @internal - Use at your own risk
+	 */
+	readonly renderer?: unknown;
+
+	/**
+	 * Get the pixel dimensions of a single character cell.
+	 * Used for scroll calculations and viewport sizing on mobile.
+	 *
+	 * @returns Cell width and height in CSS pixels, or null if not yet rendered
+	 */
+	getCellMetrics?(): { width: number; height: number } | null;
+
+	/**
 	 * Clean up resources and detach event listeners.
 	 * The Terminal instance should not be used after calling dispose().
 	 */
@@ -335,13 +360,23 @@ export interface Parser {
 	/**
 	 * Register a handler for a specific OSC sequence identifier.
 	 *
+	 * Multiple handlers can be registered for the same OSC ID and will be
+	 * invoked in registration order. If a handler returns `true`, propagation
+	 * stops and subsequent handlers for that OSC ID are not invoked.
+	 *
+	 * OSC 133 (shell integration) is NOT automatically handled by sterk.
+	 * Consumers must register their own OSC 133 handler if they want to
+	 * track prompt boundaries, command execution, or command output regions.
+	 *
 	 * Example: Register a handler for OSC 133 (shell integration):
 	 * ```
 	 * term.parser.registerOscHandler(133, (data) => {
 	 *   const kind = data.charAt(0); // 'A', 'B', 'C', 'D'
 	 *   if (kind === 'A' || kind === 'B') {
 	 *     // Mark prompt boundary at current cursor position
+	 *     return true; // Stop propagation
 	 *   }
+	 *   return false; // Allow other handlers
 	 * });
 	 * ```
 	 *
