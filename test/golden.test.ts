@@ -246,7 +246,7 @@ describe("Golden tests", () => {
 			term.write("\x1b[2A"); // Up 2 lines
 
 			const cursorY = term.buffer.active.cursorY;
-			expect(cursorY).toBe(1); // Started at 3, moved up 2
+			expect(cursorY).toBe(0); // Started at row 2, moved up 2
 			term.dispose();
 		});
 
@@ -414,6 +414,77 @@ describe("Golden tests", () => {
 
 			const line = term.buffer.active.getLine(0)?.translateToString(true);
 			expect(line).toBe("日本語");
+			term.dispose();
+		});
+
+		it("handles mixed ASCII and CJK", () => {
+			const term = createTerminal({ cols: 20, rows: 5 });
+			term.write("Hello 日本 World");
+
+			const line = term.buffer.active.getLine(0)?.translateToString(true);
+			expect(line).toBe("Hello 日本 World");
+			term.dispose();
+		});
+
+		it("handles 4-byte emoji sequences", () => {
+			const term = createTerminal({ cols: 20, rows: 5 });
+			term.write("Test 🚀🎉 done");
+
+			const line = term.buffer.active.getLine(0)?.translateToString(true);
+			expect(line).toBe("Test 🚀🎉 done");
+			term.dispose();
+		});
+
+		it("handles invalid UTF-8 sequences gracefully", () => {
+			const term = createTerminal({ cols: 20, rows: 5 });
+			// Send invalid UTF-8: continuation byte without lead byte
+			const invalidUtf8 = new Uint8Array([0x48, 0x69, 0x80, 0x21]); // Hi[invalid]!
+			term.write(invalidUtf8);
+
+			// Should not crash - decoder should handle gracefully
+			const line = term.buffer.active.getLine(0)?.translateToString(true);
+			expect(line).toBeTruthy(); // Just verify it doesn't crash
+			term.dispose();
+		});
+	});
+
+	describe("CSI parameter edge cases", () => {
+		it("handles omitted parameters (default to 1)", () => {
+			const term = createTerminal({ cols: 20, rows: 5 });
+			term.write("ABCDEFGH");
+			term.write("\x1b[D"); // CUB with no param, should default to 1
+
+			expect(term.buffer.active.cursorX).toBe(7); // Moved back 1 from 8
+			term.dispose();
+		});
+
+		it("handles empty parameters between semicolons", () => {
+			const term = createTerminal({ cols: 20, rows: 5 });
+			term.write("\x1b[;5H"); // CUP with empty row param, col=5
+
+			// Empty param should default to 1, so position (1,5) -> 0-indexed (0,4)
+			expect(term.buffer.active.cursorY).toBe(0);
+			expect(term.buffer.active.cursorX).toBe(4);
+			term.dispose();
+		});
+
+		it("handles very large parameters (clamped to buffer)", () => {
+			const term = createTerminal({ cols: 20, rows: 5 });
+			term.write("\x1b[9999;9999H"); // CUP to ridiculously large position
+
+			// Should clamp to max valid position
+			expect(term.buffer.active.cursorY).toBeLessThan(5);
+			expect(term.buffer.active.cursorX).toBeLessThan(20);
+			term.dispose();
+		});
+
+		it("handles zero parameters (treated as 1)", () => {
+			const term = createTerminal({ cols: 20, rows: 5 });
+			term.write("ABCDEFGH");
+			term.write("\x1b[0D"); // CUB with param=0, should move back 1
+
+			// param=0 typically defaults to 1 in most sequences
+			expect(term.buffer.active.cursorX).toBeLessThan(8);
 			term.dispose();
 		});
 	});

@@ -226,13 +226,17 @@ export class TerminalImpl implements Terminal {
 			case 0x0b: // VT (vertical tab, treat as LF)
 			case 0x0c: // FF (form feed, treat as LF)
 				{
+					// Modern terminals treat LF as newline (LF+CR) by default
 					const y = this.scrollBuffer.cursorY;
 					if (y >= this.rows - 1) {
-						// At bottom row - scroll up
+						// At bottom row - insert new line and move cursor to it
 						this.scrollBuffer.insertLine();
+						// Move cursor to the newly inserted line (at the end of buffer)
+						const newLineIndex = this.scrollBuffer.length - 1;
+						this.scrollBuffer.setCursor(0, newLineIndex);
 					} else {
-						// Move cursor down
-						this.scrollBuffer.setCursor(this.scrollBuffer.cursorX, y + 1);
+						// Move cursor to start of next line
+						this.scrollBuffer.setCursor(0, y + 1);
 					}
 				}
 				break;
@@ -269,7 +273,8 @@ export class TerminalImpl implements Terminal {
 		switch (final) {
 			case 0x41: // CUU - Cursor Up
 				{
-					const n = p1;
+					// Param 0 is treated as 1 for cursor movement
+					const n = Math.max(1, p1);
 					const y = this.scrollBuffer.cursorY;
 					this.scrollBuffer.setCursor(
 						this.scrollBuffer.cursorX,
@@ -280,7 +285,8 @@ export class TerminalImpl implements Terminal {
 
 			case 0x42: // CUD - Cursor Down
 				{
-					const n = p1;
+					// Param 0 is treated as 1 for cursor movement
+					const n = Math.max(1, p1);
 					const y = this.scrollBuffer.cursorY;
 					this.scrollBuffer.setCursor(
 						this.scrollBuffer.cursorX,
@@ -291,7 +297,8 @@ export class TerminalImpl implements Terminal {
 
 			case 0x43: // CUF - Cursor Forward
 				{
-					const n = p1;
+					// Param 0 is treated as 1 for cursor movement
+					const n = Math.max(1, p1);
 					const x = this.scrollBuffer.cursorX;
 					this.scrollBuffer.setCursor(
 						Math.min(this.cols - 1, x + n),
@@ -302,7 +309,8 @@ export class TerminalImpl implements Terminal {
 
 			case 0x44: // CUB - Cursor Back
 				{
-					const n = p1;
+					// Param 0 is treated as 1 for cursor movement
+					const n = Math.max(1, p1);
 					const x = this.scrollBuffer.cursorX;
 					this.scrollBuffer.setCursor(
 						Math.max(0, x - n),

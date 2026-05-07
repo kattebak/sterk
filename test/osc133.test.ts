@@ -190,14 +190,14 @@ describe("OSC 133 handler registration", () => {
 	});
 
 	it("tracks cursor position for OSC 133 markers", () => {
-		const markers = new Map<number, string>();
+		const markers: Array<{ kind: string; absY: number }> = [];
 
 		term.parser.registerOscHandler(133, (data) => {
 			const kind = data.charAt(0);
 			if (kind === "A" || kind === "B" || kind === "C" || kind === "D") {
 				const buffer = term.buffer.active;
 				const absY = buffer.baseY + buffer.cursorY;
-				markers.set(absY, kind);
+				markers.push({ kind, absY });
 			}
 			return false;
 		});
@@ -207,12 +207,13 @@ describe("OSC 133 handler registration", () => {
 		term.write("\x1b]133;C\x07"); // Command start
 		term.write("\nfile1.txt\nfile2.txt\n\x1b]133;D;0\x07"); // Output + command end
 
-		// Markers should be recorded at different Y positions
-		expect(markers.size).toBeGreaterThan(0);
-		expect(Array.from(markers.values())).toContain("A");
-		expect(Array.from(markers.values())).toContain("B");
-		expect(Array.from(markers.values())).toContain("C");
-		expect(Array.from(markers.values())).toContain("D");
+		// All markers should be recorded
+		expect(markers.length).toBe(4);
+		const kinds = markers.map((m) => m.kind);
+		expect(kinds).toContain("A");
+		expect(kinds).toContain("B");
+		expect(kinds).toContain("C");
+		expect(kinds).toContain("D");
 
 		term.dispose();
 	});

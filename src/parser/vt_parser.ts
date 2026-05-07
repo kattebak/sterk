@@ -77,6 +77,13 @@ class Utf8Decoder {
 	private expected = 0;
 
 	/**
+	 * Get the number of bytes expected (0 if not in a sequence)
+	 */
+	getExpected(): number {
+		return this.expected;
+	}
+
+	/**
 	 * Process a byte and return the decoded character if complete
 	 */
 	decode(byte: number): string | null {
@@ -283,17 +290,23 @@ export class VtParser {
 		}
 
 		// C0 controls (00-1F except ESC)
-		// In OSC_STRING state, BEL (0x07) terminates the string, so don't execute it
+		// In OSC_STRING state, BEL (0x07) terminates the string, and ESC (0x1B) is part of ST,
+		// so don't execute them - let handleOscString handle them
 		if (
 			byte < 0x20 &&
-			!(this.state === ParserState.OSC_STRING && byte === 0x07)
+			!(
+				this.state === ParserState.OSC_STRING &&
+				(byte === 0x07 || byte === 0x1b)
+			)
 		) {
 			this.actions.execute(byte);
 			return true;
 		}
 
-		// C1 controls (80-9F) - treat as execute
-		if (byte >= 0x80 && byte <= 0x9f) {
+		// C1 controls (80-9F) - but only if NOT in the middle of UTF-8 sequence
+		// UTF-8 continuation bytes are 0x80-0xBF, which overlap with C1 controls
+		// If we're expecting UTF-8 continuation bytes, don't treat them as C1 controls
+		if (byte >= 0x80 && byte <= 0x9f && this.utf8Decoder.getExpected() === 0) {
 			// CSI (9B) transitions to CSI_ENTRY
 			if (byte === 0x9b) {
 				this.transitionTo(ParserState.CSI_ENTRY);
