@@ -122,6 +122,14 @@ export interface Terminal {
 	readonly renderer?: unknown;
 
 	/**
+	 * Attach the terminal to a DOM container and start rendering.
+	 * This is optional — the terminal can run in headless mode without calling open().
+	 *
+	 * @param container - DOM element to render the terminal into
+	 */
+	open?(container: HTMLElement): void;
+
+	/**
 	 * Get the pixel dimensions of a single character cell.
 	 * Used for scroll calculations and viewport sizing on mobile.
 	 *

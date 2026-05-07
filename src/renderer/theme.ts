@@ -1,0 +1,143 @@
+/**
+ * Theme mapping utilities
+ *
+ * Maps sterk Theme interface to Ace theme configuration and CSS variables.
+ * Supports live theme swapping without reloading the editor.
+ */
+
+import type { Theme } from "../types.js";
+import { buildPalette } from "../util/colors.js";
+
+/**
+ * Default theme colors if not specified
+ */
+export const DEFAULT_THEME: Required<
+	Pick<
+		Theme,
+		| "foreground"
+		| "background"
+		| "cursor"
+		| "cursorAccent"
+		| "selectionBackground"
+	>
+> = {
+	foreground: "#f0f0f0",
+	background: "#1e1e1e",
+	cursor: "#f0f0f0",
+	cursorAccent: "#1e1e1e",
+	selectionBackground: "rgba(58, 117, 175, 0.3)",
+};
+
+/**
+ * Generate Ace theme CSS from a sterk Theme
+ *
+ * @param theme - Sterk theme configuration
+ * @returns CSS string for Ace theme
+ */
+export function generateAceThemeCss(theme: Theme = {}): string {
+	const fg = theme.foreground ?? DEFAULT_THEME.foreground;
+	const bg = theme.background ?? DEFAULT_THEME.background;
+	const cursor = theme.cursor ?? DEFAULT_THEME.cursor;
+	const cursorAccent = theme.cursorAccent ?? DEFAULT_THEME.cursorAccent;
+	const selection =
+		theme.selectionBackground ?? DEFAULT_THEME.selectionBackground;
+
+	// Build the 256-color palette, merging theme palette if provided
+	const fullPalette = buildPalette();
+	if (theme.palette) {
+		for (let i = 0; i < Math.min(theme.palette.length, 16); i++) {
+			const color = theme.palette[i];
+			if (color) {
+				fullPalette[i] = color;
+			}
+		}
+	}
+
+	// Handle individual ANSI color overrides from theme
+	const ansiOverrides: Record<number, string> = {};
+	if (theme.black) ansiOverrides[0] = theme.black;
+	if (theme.red) ansiOverrides[1] = theme.red;
+	if (theme.green) ansiOverrides[2] = theme.green;
+	if (theme.yellow) ansiOverrides[3] = theme.yellow;
+	if (theme.blue) ansiOverrides[4] = theme.blue;
+	if (theme.magenta) ansiOverrides[5] = theme.magenta;
+	if (theme.cyan) ansiOverrides[6] = theme.cyan;
+	if (theme.white) ansiOverrides[7] = theme.white;
+	if (theme.brightBlack) ansiOverrides[8] = theme.brightBlack;
+	if (theme.brightRed) ansiOverrides[9] = theme.brightRed;
+	if (theme.brightGreen) ansiOverrides[10] = theme.brightGreen;
+	if (theme.brightYellow) ansiOverrides[11] = theme.brightYellow;
+	if (theme.brightBlue) ansiOverrides[12] = theme.brightBlue;
+	if (theme.brightMagenta) ansiOverrides[13] = theme.brightMagenta;
+	if (theme.brightCyan) ansiOverrides[14] = theme.brightCyan;
+	if (theme.brightWhite) ansiOverrides[15] = theme.brightWhite;
+
+	for (const [index, color] of Object.entries(ansiOverrides)) {
+		fullPalette[Number(index)] = color;
+	}
+
+	// Generate CSS custom properties for palette colors
+	const paletteVars = fullPalette
+		.map((color, index) => `  --sterk-palette-${index}: ${color};`)
+		.join("\n");
+
+	return `
+.sterk {
+  --sterk-fg: ${fg};
+  --sterk-bg: ${bg};
+  --sterk-cursor: ${cursor};
+  --sterk-cursor-accent: ${cursorAccent};
+  --sterk-selection: ${selection};
+${paletteVars}
+}
+
+.ace_editor {
+  background-color: var(--sterk-bg);
+  color: var(--sterk-fg);
+}
+
+.ace_cursor {
+  border-left-color: var(--sterk-cursor);
+  background-color: var(--sterk-cursor);
+  color: var(--sterk-cursor-accent);
+}
+
+.ace_selection {
+  background-color: var(--sterk-selection);
+}
+
+.ace_marker-layer .ace_selection {
+  background-color: var(--sterk-selection);
+}
+`.trim();
+}
+
+/**
+ * Inject theme CSS into the document
+ *
+ * @param css - Theme CSS string
+ * @param id - Style element ID for reuse
+ */
+export function injectThemeCss(css: string, id = "sterk-theme"): void {
+	// Remove existing theme style if present
+	const existing = document.getElementById(id);
+	if (existing) {
+		existing.remove();
+	}
+
+	// Inject new theme
+	const style = document.createElement("style");
+	style.id = id;
+	style.textContent = css;
+	document.head.appendChild(style);
+}
+
+/**
+ * Apply a theme to the terminal
+ *
+ * @param theme - Sterk theme configuration
+ */
+export function applyTheme(theme: Theme): void {
+	const css = generateAceThemeCss(theme);
+	injectThemeCss(css);
+}
