@@ -13,7 +13,7 @@ Touch-friendly. Mobile-first. MIT.
 - ✅ **M1** — Foundation utilities (256-color palette, scrollback buffer, EventEmitter shim)
 - ✅ **M2** — Clean-room VT core (Paul Williams parser, SGR, OSC 133, `Terminal` factory)
 - 🚧 **M3** — Ace renderer glue (input, mouse, links, theme, DOM)
-- ⏳ **M4** — Polish, docs, demo page, 1.0 release
+- ✅ **M4** — Polish, alt-screen buffer, demo page, 1.0 release
 
 See [docs/ROADMAP.md](./docs/ROADMAP.md).
 
@@ -23,7 +23,86 @@ See [docs/ROADMAP.md](./docs/ROADMAP.md).
 npm install @kattebak/sterk
 ```
 
-`createTerminal()` currently returns a headless `Terminal` (parser + buffer + events). DOM rendering lands in M3.
+## Size
+
+Sterk is lightweight — under **53 kB packed** (including Ace as a peer dependency).
+
+Run `npm run size` to verify the current bundle size against the 75 kB budget.
+
+## Demo
+
+A standalone demo is available in `demo/index.html`. To run it:
+
+```bash
+npm run build
+npm run demo
+```
+
+Then open http://localhost:3000 in your browser.
+
+## Usage
+
+### Headless mode (parser + buffer only)
+
+```typescript
+import { createTerminal } from '@kattebak/sterk';
+
+const term = createTerminal({ cols: 80, rows: 24 });
+
+term.write('Hello, world!\r\n');
+term.write('\x1b[1;31mBold red text\x1b[0m\r\n');
+
+term.onData((data) => {
+  console.log('User input:', data);
+  // Forward to backend (WebSocket, pty, etc.)
+});
+
+// Access buffer for rendering
+const line = term.buffer.active.getLine(0);
+console.log(line?.translateToString());
+```
+
+### DOM mode (with Ace renderer)
+
+```typescript
+import { createTerminal } from '@kattebak/sterk';
+
+const term = createTerminal({
+  cols: 80,
+  rows: 24,
+  theme: {
+    foreground: '#f0f0f0',
+    background: '#1e1e1e',
+  },
+});
+
+// Attach to DOM
+const container = document.getElementById('terminal');
+term.open(container);
+
+term.write('Welcome to sterk!\r\n');
+
+// Register OSC 133 handler for shell integration
+term.parser.registerOscHandler(133, (data) => {
+  const kind = data.charAt(0); // 'A', 'B', 'C', 'D'
+  if (kind === 'A') {
+    console.log('Prompt start');
+  }
+  return false; // Allow other handlers
+});
+```
+
+See `demo/` for a complete standalone example.
+
+## Public API
+
+- `createTerminal(options?: TerminalOptions): Terminal` — Create a terminal instance
+- `Terminal` — Main terminal interface (write, resize, open, dispose)
+- `Parser.registerOscHandler(id, handler)` — Register OSC sequence handlers
+- `Buffer` / `BufferLine` / `BufferCell` — Read-only buffer access with full SGR attributes
+- `Theme` — Color theme definition (foreground, background, ANSI palette)
+
+See `src/types.ts` for full API documentation with JSDoc comments and examples.
 
 ## Design principles
 
