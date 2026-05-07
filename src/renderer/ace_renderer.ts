@@ -112,6 +112,15 @@ export class AceRenderer {
 	}
 
 	/**
+	 * Handle buffer switch (normal ↔ alternate screen)
+	 * Called when terminal switches between buffers
+	 */
+	onBufferSwitch(): void {
+		// Force a full re-render
+		this.scheduleUpdate();
+	}
+
+	/**
 	 * Schedule a buffer → document sync
 	 * Uses requestAnimationFrame to batch updates
 	 */

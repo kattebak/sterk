@@ -45,7 +45,6 @@ class ParserImpl implements Parser {
  */
 export class TerminalImpl implements Terminal {
 	private bufferNamespace: BufferNamespaceImpl;
-	private scrollBuffer: ScrollBuffer;
 	private vtParser: VtParser;
 	private parserImpl: ParserImpl;
 	private emitter = new EventEmitter();
@@ -74,7 +73,6 @@ export class TerminalImpl implements Terminal {
 			this._options.rows,
 			this._options.scrollback,
 		);
-		this.scrollBuffer = this.bufferNamespace._getScrollBuffer();
 
 		// Create parser with action handlers
 		this.vtParser = new VtParser({
@@ -126,6 +124,13 @@ export class TerminalImpl implements Terminal {
 
 	get buffer(): BufferNamespace {
 		return this.bufferNamespace;
+	}
+
+	/**
+	 * Get the active scroll buffer (always returns the current active buffer)
+	 */
+	private get scrollBuffer(): ScrollBuffer {
+		return this.bufferNamespace._getScrollBuffer();
 	}
 
 	write(data: string | Uint8Array, callback?: () => void): void {
@@ -349,9 +354,21 @@ export class TerminalImpl implements Terminal {
 	/**
 	 * Handle ESC sequences
 	 */
-	private handleEscDispatch(_intermediates: number[], _final: number): void {
-		// Basic ESC sequences not implemented in M2
-		// Could add: ESC 7 (save cursor), ESC 8 (restore cursor), etc.
+	private handleEscDispatch(intermediates: number[], final: number): void {
+		// Handle cursor save/restore (DECSC/DECRC)
+		if (intermediates.length === 0) {
+			switch (final) {
+				case 0x37: // ESC 7 - DECSC (save cursor)
+					this.bufferNamespace.saveCursor(this.vtParser.currentAttrs);
+					break;
+				case 0x38: // ESC 8 - DECRC (restore cursor)
+					this.bufferNamespace.restoreCursor(this.vtParser.currentAttrs);
+					break;
+				default:
+					// Unknown ESC sequence - ignore
+					break;
+			}
+		}
 	}
 
 	/**
@@ -432,6 +449,22 @@ export class TerminalImpl implements Terminal {
 
 			case 0x4b: // EL - Erase in Line
 				this.eraseInLine(p1);
+				break;
+
+			case 0x68: // SM - Set Mode (CSI ? ... h)
+			case 0x6c: // RM - Reset Mode (CSI ? ... l)
+				// Check for DEC private modes (indicated by '?' intermediate)
+				if (_intermediates.length === 1 && _intermediates[0] === 0x3f) {
+					this.handleDecPrivateMode(params, final === 0x68);
+				}
+				break;
+
+			case 0x73: // DECSC (CSI s) - Save cursor (non-standard, but common)
+				this.bufferNamespace.saveCursor(this.vtParser.currentAttrs);
+				break;
+
+			case 0x75: // DECRC (CSI u) - Restore cursor (non-standard, but common)
+				this.bufferNamespace.restoreCursor(this.vtParser.currentAttrs);
 				break;
 
 			case 0x6d: // SGR - Select Graphic Rendition
@@ -560,6 +593,72 @@ export class TerminalImpl implements Terminal {
 
 			default:
 				break;
+		}
+	}
+
+	/**
+	 * Handle DEC private modes (CSI ? ... h / CSI ? ... l)
+	 * Used for alternate screen buffer switching and other terminal modes.
+	 */
+	private handleDecPrivateMode(params: number[][], set: boolean): void {
+		for (const paramGroup of params) {
+			if (!paramGroup || paramGroup.length === 0) continue;
+			const mode = paramGroup[0];
+			if (mode === undefined) continue;
+
+			switch (mode) {
+				case 1047: // DECSET 1047 - Switch to/from alternate screen
+					if (set) {
+						this.bufferNamespace.switchToAlternate();
+						if (this.aceRenderer) {
+							this.aceRenderer.onBufferSwitch();
+						}
+					} else {
+						this.bufferNamespace.switchToNormal();
+						if (this.aceRenderer) {
+							this.aceRenderer.onBufferSwitch();
+						}
+					}
+					break;
+
+				case 1048: // DECSET 1048 - Save/restore cursor position
+					if (set) {
+						this.bufferNamespace.saveCursor(this.vtParser.currentAttrs);
+					} else {
+						this.bufferNamespace.restoreCursor(this.vtParser.currentAttrs);
+					}
+					break;
+
+				case 1049: // DECSET 1049 - Combined (save cursor + switch to alt + clear alt)
+					if (set) {
+						// Save cursor
+						this.bufferNamespace.saveCursor(this.vtParser.currentAttrs);
+						// Switch to alternate
+						this.bufferNamespace.switchToAlternate();
+						// Clear alternate screen
+						this.scrollBuffer.clear();
+						// Notify renderer
+						if (this.aceRenderer) {
+							this.aceRenderer.onBufferSwitch();
+						}
+					} else {
+						// Clear alternate screen
+						this.scrollBuffer.clear();
+						// Switch back to normal
+						this.bufferNamespace.switchToNormal();
+						// Restore cursor
+						this.bufferNamespace.restoreCursor(this.vtParser.currentAttrs);
+						// Notify renderer
+						if (this.aceRenderer) {
+							this.aceRenderer.onBufferSwitch();
+						}
+					}
+					break;
+
+				// Other DEC private modes - ignore for now
+				default:
+					break;
+			}
 		}
 	}
 }
