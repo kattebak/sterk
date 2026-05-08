@@ -40,7 +40,9 @@ export class AceRenderer {
 	private updateScheduled = false;
 
 	/**
-	 * Get the active buffer (normal or alternate)
+	 * Get the active buffer (normal or alternate).
+	 * This getter ensures the renderer always reads from the current active buffer,
+	 * not a fixed reference set at construction time.
 	 */
 	private get buffer(): ScrollBuffer {
 		return this.bufferNamespace._getScrollBuffer();
