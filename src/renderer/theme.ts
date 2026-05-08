@@ -81,6 +81,21 @@ export function generateAceThemeCss(theme: Theme = {}): string {
 		.map((color, index) => `  --sterk-palette-${index}: ${color};`)
 		.join("\n");
 
+	// Generate SGR styling rules for palette colors
+	const fgPaletteRules = fullPalette
+		.map(
+			(color, index) =>
+				`.ace_editor .sterk-fg-${index} { color: ${color} !important; }`,
+		)
+		.join("\n");
+
+	const bgPaletteRules = fullPalette
+		.map(
+			(color, index) =>
+				`.ace_editor .sterk-bg-${index} { background-color: ${color} !important; }`,
+		)
+		.join("\n");
+
 	return `
 .sterk {
   --sterk-fg: ${fg};
@@ -109,6 +124,31 @@ ${paletteVars}
 .ace_marker-layer .ace_selection {
   background-color: var(--sterk-selection);
 }
+
+/* SGR foreground palette colors (0-255) */
+${fgPaletteRules}
+
+/* SGR background palette colors (0-255) */
+${bgPaletteRules}
+
+/* SGR text attributes */
+.ace_editor .sterk-bold {
+  font-weight: bold !important;
+}
+
+.ace_editor .sterk-italic {
+  font-style: italic !important;
+}
+
+.ace_editor .sterk-underline {
+  text-decoration: underline !important;
+}
+
+.ace_editor .sterk-dim {
+  opacity: 0.5 !important;
+}
+
+/* Truecolor support: classes are injected dynamically per color */
 `.trim();
 }
 
@@ -140,4 +180,49 @@ export function injectThemeCss(css: string, id = "sterk-theme"): void {
 export function applyTheme(theme: Theme): void {
 	const css = generateAceThemeCss(theme);
 	injectThemeCss(css);
+}
+
+/**
+ * Cache of injected truecolor CSS classes
+ */
+const truecolorCache = new Set<string>();
+
+/**
+ * Inject CSS for a truecolor RGB value (24-bit)
+ *
+ * @param rgb - RGB value (0xRRGGBB)
+ * @param target - "fg" or "bg"
+ */
+export function injectTruecolorCss(rgb: number, target: "fg" | "bg"): void {
+	const hex = rgb.toString(16).padStart(6, "0");
+	const className = `sterk-${target}-rgb-${hex}`;
+
+	// Skip if already injected
+	if (truecolorCache.has(className)) {
+		return;
+	}
+
+	truecolorCache.add(className);
+
+	// Convert RGB to CSS hex color
+	const color = `#${hex}`;
+
+	// Inject CSS rule
+	const css =
+		target === "fg"
+			? `.ace_editor .${className} { color: ${color} !important; }`
+			: `.ace_editor .${className} { background-color: ${color} !important; }`;
+
+	// Find or create truecolor style element
+	let styleEl = document.getElementById(
+		"sterk-truecolor",
+	) as HTMLStyleElement | null;
+	if (!styleEl) {
+		styleEl = document.createElement("style");
+		styleEl.id = "sterk-truecolor";
+		document.head.appendChild(styleEl);
+	}
+
+	// Append rule
+	styleEl.textContent += `\n${css}`;
 }

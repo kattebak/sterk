@@ -228,7 +228,8 @@ class BufferLineImpl implements BufferLine {
 export class ScrollBuffer implements Buffer {
 	private lines: Line[] = [];
 	private maxLines: number;
-	private cols: number;
+	/** Number of columns in the buffer */
+	cols: number;
 	private rows: number;
 
 	/** Absolute row index of the first scrollback line */
