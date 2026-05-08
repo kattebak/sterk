@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Renderer**: Fix alternate screen buffer rendering — `AceRenderer` now tracks the active buffer (normal or alternate) instead of holding a fixed reference to the normal buffer. Fixes display corruption when using `vim`, `less`, `htop`, or `tmux` alternate screen
 - **Renderer**: Force `editor.resize(true)` on `open()` to ensure Ace measures layout correctly when attached to pre-sized containers
 - **Renderer**: Render SGR colors and text attributes (bold, italic, underline, dim, inverse) via custom Ace tokenizer
   - ANSI colors (0-15) via SGR 30-37, 40-47, 90-97, 100-107
@@ -28,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Standalone demo page (`demo/index.html`) with theme switching and OSC 133 examples
   - Comprehensive API documentation in README with usage examples
   - Contributing guidelines (CONTRIBUTING.md) with clean-room development rules
-  - 12 new tests for alternate screen buffer functionality (250 tests total)
+  - 17 tests for alternate screen buffer functionality (including 5 renderer tests)
 
 - **M3: Ace Renderer Glue** (merged)
   - Ace `EditSession` bridge with incremental buffer updates
