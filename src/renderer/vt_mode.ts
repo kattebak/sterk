@@ -14,7 +14,7 @@
  */
 
 import type { Ace } from "ace-builds";
-import type { ScrollBuffer } from "../buffer/scroll_buffer.js";
+import type { BufferNamespaceImpl } from "../buffer/scroll_buffer.js";
 
 /**
  * Token representing a run of cells with identical attributes
@@ -28,17 +28,13 @@ interface VtToken {
  * Custom Ace mode for VT terminal rendering
  */
 export class VtMode {
-	private buffer: ScrollBuffer;
-
-	constructor(buffer: ScrollBuffer, _cols: number) {
-		this.buffer = buffer;
-	}
+	constructor(private bufferNamespace: BufferNamespaceImpl) {}
 
 	/**
 	 * Get Ace mode object
 	 */
 	getMode(): Ace.SyntaxMode {
-		const buffer = this.buffer;
+		const bufferNamespace = this.bufferNamespace;
 
 		// Return a minimal mode object. TypeScript doesn't like partial modes,
 		// but Ace handles them fine at runtime. Cast through unknown to bypass.
@@ -51,7 +47,7 @@ export class VtMode {
 					// Ace calls getLineTokens for each visible line
 					getLineTokens: (lineText: string, _state: string, row: number) => {
 						const tokens: VtToken[] = [];
-						const line = buffer.getLine(row);
+						const line = bufferNamespace._getScrollBuffer().getLine(row);
 
 						if (!line) {
 							// Empty line

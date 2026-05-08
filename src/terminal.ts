@@ -209,7 +209,7 @@ export class TerminalImpl implements Terminal {
 		// Create renderer
 		this.aceRenderer = new AceRenderer(
 			container,
-			this.scrollBuffer,
+			this.bufferNamespace,
 			this._options.fontSize,
 		);
 
