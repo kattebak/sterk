@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Renderer**: Force `editor.resize(true)` on `open()` to ensure Ace measures layout correctly when attached to pre-sized containers
+- **Renderer**: Render SGR colors and text attributes (bold, italic, underline, dim, inverse) via custom Ace tokenizer
+  - ANSI colors (0-15) via SGR 30-37, 40-47, 90-97, 100-107
+  - 256-color palette via SGR 38;5;N and 48;5;N
+  - 24-bit truecolor via SGR 38;2;R;G;B and 48;2;R;G;B
+  - Bold, italic, underline, dim text attributes
+  - Inverse video (swaps fg/bg)
+  - CSS class-based rendering for palette colors
+  - Dynamic CSS injection for truecolor
+
 ### Added
 
 - **M4: Polish & 1.0 Release Prep**

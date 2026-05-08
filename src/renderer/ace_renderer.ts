@@ -24,6 +24,8 @@ import type { Ace } from "ace-builds";
 import ace from "ace-builds";
 import type { ScrollBuffer } from "../buffer/scroll_buffer.js";
 import type { Buffer } from "../types.js";
+import { injectTruecolorCss } from "./theme.js";
+import { VtMode } from "./vt_mode.js";
 
 /**
  * Ace renderer implementation
@@ -70,6 +72,13 @@ export class AceRenderer {
 		// Disable Ace's built-in behaviors
 		this.session.setUseWrapMode(false);
 		this.session.setUseSoftTabs(false);
+
+		// Set custom VT mode for SGR rendering
+		const vtMode = new VtMode(this.buffer, this.buffer.cols);
+		this.session.setMode(vtMode.getMode());
+
+		// Force editor to measure layout (critical when container is pre-sized)
+		this.editor.resize(true);
 
 		// Initialize with buffer content
 		this.syncBufferToDocument();
@@ -147,6 +156,9 @@ export class AceRenderer {
 		const docLines = document.getLength();
 		const bufferLines = buffer.length;
 
+		// Pre-inject truecolor CSS for all cells in the buffer
+		this.injectTruecolorStyles();
+
 		// Ensure document has correct number of lines
 		if (docLines < bufferLines) {
 			// Add missing lines
@@ -181,14 +193,43 @@ export class AceRenderer {
 	}
 
 	/**
-	 * Render a buffer line to text with ANSI styling
-	 * For now, we render plain text. SGR rendering will be enhanced in future.
+	 * Render a buffer line to text (SGR styling is handled by VtMode tokenizer)
 	 */
 	private renderLine(
 		line: Buffer extends { getLine(y: number): infer L } ? L : never,
 	): string {
 		if (!line) return "";
 		return line.translateToString(false);
+	}
+
+	/**
+	 * Pre-inject CSS for all truecolor colors in the buffer
+	 * This ensures the CSS classes exist before Ace tokenizes
+	 */
+	private injectTruecolorStyles(): void {
+		const buffer = this.buffer;
+		for (let row = 0; row < buffer.length; row++) {
+			const line = buffer.getLine(row);
+			if (!line) continue;
+
+			// Scan all cells in the line
+			const text = line.translateToString(false);
+			for (let col = 0; col < text.length; col++) {
+				const cell = line.getCell(col);
+
+				// Check for truecolor foreground
+				if (cell.isFgRGB()) {
+					const rgb = cell.getFgColor();
+					injectTruecolorCss(rgb, "fg");
+				}
+
+				// Check for truecolor background
+				if (cell.isBgRGB()) {
+					const rgb = cell.getBgColor();
+					injectTruecolorCss(rgb, "bg");
+				}
+			}
+		}
 	}
 
 	/**
