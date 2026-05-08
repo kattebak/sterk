@@ -22,7 +22,10 @@
 
 import type { Ace } from "ace-builds";
 import ace from "ace-builds";
-import type { ScrollBuffer } from "../buffer/scroll_buffer.js";
+import type {
+	BufferNamespaceImpl,
+	ScrollBuffer,
+} from "../buffer/scroll_buffer.js";
 import type { Buffer } from "../types.js";
 import { injectTruecolorCss } from "./theme.js";
 import { VtMode } from "./vt_mode.js";
@@ -36,9 +39,16 @@ export class AceRenderer {
 	private viewportDiv: HTMLElement;
 	private updateScheduled = false;
 
+	/**
+	 * Get the active buffer (normal or alternate)
+	 */
+	private get buffer(): ScrollBuffer {
+		return this.bufferNamespace._getScrollBuffer();
+	}
+
 	constructor(
 		private container: HTMLElement,
-		private buffer: ScrollBuffer,
+		private bufferNamespace: BufferNamespaceImpl,
 		fontSize: number,
 	) {
 		// Create wrapper with sterk class
@@ -74,7 +84,7 @@ export class AceRenderer {
 		this.session.setUseSoftTabs(false);
 
 		// Set custom VT mode for SGR rendering
-		const vtMode = new VtMode(this.buffer, this.buffer.cols);
+		const vtMode = new VtMode(this.bufferNamespace);
 		this.session.setMode(vtMode.getMode());
 
 		// Force editor to measure layout (critical when container is pre-sized)
