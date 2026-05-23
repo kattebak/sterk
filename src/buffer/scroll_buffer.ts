@@ -349,6 +349,20 @@ export class ScrollBuffer implements Buffer {
 		const line = createBlankLine(this.cols);
 		line.isWrapped = wrapped;
 
+		// Decide whether the viewport was "pinned to the live screen"
+		// BEFORE we mutate the buffer. The live screen always occupies
+		// the bottom `rows` lines of the buffer; the pinned viewport
+		// position is therefore `lines.length - rows` (clamped to >= 0).
+		//
+		// The previous check (`viewportY === baseY`) only held while the
+		// buffer was strictly smaller than the scrollback capacity, which
+		// kept baseY at 0. As soon as the buffer grew past `rows` lines
+		// the viewport stopped auto-scrolling and the live screen got
+		// clipped below the visible area while old scrollback occupied
+		// the top of the renderer.
+		const wasAtBottom =
+			this._viewportY === Math.max(0, this.lines.length - this.rows);
+
 		// If we're at capacity, remove the oldest line
 		if (this.lines.length >= this.maxLines) {
 			this.lines.shift();
@@ -358,8 +372,7 @@ export class ScrollBuffer implements Buffer {
 		// Append the new line at the bottom
 		this.lines.push(line);
 
-		// Keep viewport pinned to bottom if it was already there
-		if (this._viewportY === this._baseY) {
+		if (wasAtBottom) {
 			this.scrollToBottom();
 		}
 	}
