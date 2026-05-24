@@ -44,7 +44,17 @@ export class VtMode {
 
 			getTokenizer: () => {
 				return {
-					// Ace calls getLineTokens for each visible line
+					// Ace calls getLineTokens for each visible line.
+					//
+					// We walk the **cell grid** (not the line-text character
+					// stream) so that wide-char placeholders contribute their
+					// empty `chars` and combining-mark anchors contribute their
+					// multi-codepoint `chars` ("é" = e + combining acute) in the
+					// right token. The line-text Ace passed us is exactly the
+					// concatenation of `cell.chars` for all cells, so walking
+					// cells and joining `cell.chars` reproduces `lineText`
+					// byte-for-byte, but with each char correctly attributed to
+					// the cell it came from.
 					getLineTokens: (lineText: string, _state: string, row: number) => {
 						const tokens: VtToken[] = [];
 						const line = bufferNamespace._getScrollBuffer().getLine(row);
@@ -57,20 +67,31 @@ export class VtMode {
 							};
 						}
 
-						// Group cells by attributes
+						// Group cells by attributes. We walk *cells*, not chars:
+						// a width-2 wide glyph occupies cells[i] (leading) plus
+						// cells[i+1] (placeholder, chars=""). The placeholder
+						// contributes 0 chars to the token stream so the line
+						// length still matches `lineText`.
 						let currentToken: VtToken | null = null;
-						const cols = lineText.length;
+						const cols = bufferNamespace._getScrollBuffer().cols;
 
 						for (let col = 0; col < cols; col++) {
 							const cell = line.getCell(col);
 							const char = cell.getChars();
+							// Placeholder cells (trailing half of a wide glyph)
+							// have chars=""; tag them onto the leading cell's
+							// token so attribute groupings stay contiguous and
+							// the token stream contains no zero-length chunks
+							// that the renderer would have to special-case.
+							if (char.length === 0) {
+								// Skip — the leading wide cell already wrote its
+								// glyph and the placeholder's job is purely
+								// cursor accounting.
+								continue;
+							}
 							const className = buildCellClassName(cell);
 
-							if (
-								currentToken &&
-								currentToken.type === className &&
-								currentToken.value.length < lineText.length
-							) {
+							if (currentToken && currentToken.type === className) {
 								// Extend current token
 								currentToken.value += char;
 							} else {
