@@ -37,7 +37,11 @@ export class AceRenderer {
 	private editor: Ace.Editor;
 	private session: Ace.EditSession;
 	private viewportDiv: HTMLElement;
+	private wrapper: HTMLElement;
 	private updateScheduled = false;
+	private resizeObserver: ResizeObserver | null = null;
+	private resizeFrameHandle: number | null = null;
+	private lastObservedSize: { width: number; height: number } | null = null;
 
 	/**
 	 * Get the active buffer (normal or alternate).
@@ -54,14 +58,14 @@ export class AceRenderer {
 		fontSize: number,
 	) {
 		// Create wrapper with sterk class
-		const wrapper = document.createElement("div");
-		wrapper.classList.add("sterk");
-		container.appendChild(wrapper);
+		this.wrapper = document.createElement("div");
+		this.wrapper.classList.add("sterk");
+		container.appendChild(this.wrapper);
 
 		// Create viewport inside wrapper
 		this.viewportDiv = document.createElement("div");
 		this.viewportDiv.classList.add("sterk-viewport");
-		wrapper.appendChild(this.viewportDiv);
+		this.wrapper.appendChild(this.viewportDiv);
 
 		// Create Ace editor
 		this.editor = ace.edit(this.viewportDiv);
@@ -94,6 +98,86 @@ export class AceRenderer {
 
 		// Initialize with buffer content
 		this.syncBufferToDocument();
+
+		// Observe the host container so we re-measure Ace whenever its
+		// content-box pixels change — independent of `window.resize`.
+		//
+		// Why: on Android Chrome the soft keyboard only mutates
+		// `visualViewport.height`; `window` `resize` never fires. The host
+		// element shrinks (via consumer flex layout / viewport units), but
+		// Ace's `VirtualRenderer` caches `$size.height` and only invalidates
+		// on `window.resize` or an explicit `editor.resize()`. Without this
+		// observer Ace keeps painting into the pre-keyboard viewport box and
+		// the bottom rows render behind the keyboard. See kattebak/sterk#14.
+		this.installResizeObserver();
+	}
+
+	/**
+	 * Install a `ResizeObserver` on the host container so that any change in
+	 * content-box dimensions triggers `editor.resize(true)` — forcing Ace to
+	 * re-measure its cached `$size` before the next paint.
+	 *
+	 * Callbacks are coalesced via `requestAnimationFrame` so a burst of
+	 * resize events (e.g. visualViewport scroll while the soft keyboard
+	 * animates) does not thrash the renderer.
+	 */
+	private installResizeObserver(): void {
+		// Guard for environments without ResizeObserver (e.g. older test
+		// runtimes). The consumer can still call `resize()` manually.
+		if (typeof ResizeObserver === "undefined") return;
+
+		// Seed the cached size so the very first observer callback (which
+		// fires synchronously on observe() in real browsers) is a no-op
+		// when dimensions haven't actually changed.
+		const initialRect = this.container.getBoundingClientRect();
+		this.lastObservedSize = {
+			width: initialRect.width,
+			height: initialRect.height,
+		};
+
+		this.resizeObserver = new ResizeObserver((entries) => {
+			// Always trust the latest entry. contentRect is the content-box
+			// in CSS pixels — what Ace actually cares about for laying out
+			// visible rows.
+			const entry = entries[entries.length - 1];
+			if (!entry) return;
+
+			const { width, height } = entry.contentRect;
+
+			// Skip if dimensions are identical to the last observed value
+			// (some browsers fire spurious entries on layout reads).
+			if (
+				this.lastObservedSize &&
+				this.lastObservedSize.width === width &&
+				this.lastObservedSize.height === height
+			) {
+				return;
+			}
+			this.lastObservedSize = { width, height };
+
+			// Coalesce: one rAF per burst. cancelAnimationFrame is a no-op
+			// for stale handles, but we keep the guard for clarity.
+			if (this.resizeFrameHandle !== null) return;
+
+			const raf =
+				typeof requestAnimationFrame === "function"
+					? requestAnimationFrame
+					: (cb: FrameRequestCallback): number => {
+							// Fallback for environments without rAF.
+							return setTimeout(
+								() => cb(performance.now()),
+								16,
+							) as unknown as number;
+						};
+
+			this.resizeFrameHandle = raf(() => {
+				this.resizeFrameHandle = null;
+				// Force Ace to re-measure its cached $size before the next paint.
+				this.editor.resize(true);
+			});
+		});
+
+		this.resizeObserver.observe(this.container);
 	}
 
 	/**
@@ -298,9 +382,27 @@ export class AceRenderer {
 	 * Clean up
 	 */
 	dispose(): void {
+		// Tear down the resize observer first so no callback can race the
+		// editor destruction.
+		if (this.resizeObserver) {
+			this.resizeObserver.disconnect();
+			this.resizeObserver = null;
+		}
+		if (
+			this.resizeFrameHandle !== null &&
+			typeof cancelAnimationFrame === "function"
+		) {
+			cancelAnimationFrame(this.resizeFrameHandle);
+			this.resizeFrameHandle = null;
+		}
+		this.lastObservedSize = null;
+
 		this.editor.destroy();
 		if (this.viewportDiv.parentNode) {
 			this.viewportDiv.parentNode.removeChild(this.viewportDiv);
+		}
+		if (this.wrapper.parentNode) {
+			this.wrapper.parentNode.removeChild(this.wrapper);
 		}
 	}
 }
