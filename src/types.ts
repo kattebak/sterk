@@ -194,6 +194,24 @@ export interface Terminal {
 	setTheme?(themeId: string): void;
 
 	/**
+	 * Swap to a built-in monospace font by id at runtime.
+	 *
+	 * Looks up the font in the `BUILTIN_FONTS` registry (see
+	 * `src/fonts/index.ts`), lazily injects its `@font-face` rule into a
+	 * shared `<style id="sterk-fonts">` element, and updates the renderer
+	 * font family to `'<family>', monospace` so the grid stays legible
+	 * during the font-load handshake.
+	 *
+	 * Note: only updates the *font family* applied to the renderer; the
+	 * font *size* is unchanged. To change size, set `options.fontSize`
+	 * directly.
+	 *
+	 * @param fontId - Kebab-case id of a built-in font (e.g. `"jetbrains-mono"`).
+	 * @throws Error if `fontId` is not a known built-in font.
+	 */
+	setFont?(fontId: string): void;
+
+	/**
 	 * Clean up resources and detach event listeners.
 	 * The Terminal instance should not be used after calling dispose().
 	 */
@@ -479,9 +497,32 @@ export interface TerminalOptions {
 
 	/**
 	 * Font family for rendered text.
+	 *
+	 * NOTE: prefer the `font` option (a built-in font id) over `fontFamily`
+	 * for the common case — built-in fonts ship a `@font-face` rule and a
+	 * woff2 asset, so they render correctly with no consumer setup. Use
+	 * `fontFamily` only when you want sterk to apply a CSS font stack you
+	 * have already registered yourself.
+	 *
 	 * @default 'monospace'
 	 */
 	fontFamily?: string;
+
+	/**
+	 * Built-in font id (e.g. `"jetbrains-mono"`, `"ibm-plex-mono"`,
+	 * `"cascadia-mono"`, `"fira-mono"`, `"source-code-pro"`). When set,
+	 * sterk injects the corresponding `@font-face` rule lazily and applies
+	 * the family to the renderer with `monospace` as the fallback so the
+	 * grid is still legible if the asset fails to load.
+	 *
+	 * If omitted, the constructor defaults to `DEFAULT_FONT_ID`
+	 * (JetBrains Mono) — consumers get sensible rendering out of the box
+	 * without wiring anything. Pass `font: undefined` AND a custom
+	 * `fontFamily` to opt out of the bundled fonts entirely.
+	 *
+	 * @default 'jetbrains-mono'
+	 */
+	font?: string;
 
 	/**
 	 * Font size in pixels. Live-mutable.

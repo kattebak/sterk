@@ -11,6 +11,11 @@ import {
 	DEFAULT_CELL_ATTRIBUTES,
 	type ScrollBuffer,
 } from "./buffer/scroll_buffer.js";
+import {
+	DEFAULT_FONT_ID,
+	getBuiltinFont,
+	injectFontFace,
+} from "./fonts/index.js";
 import { applySgr } from "./parser/sgr.js";
 import { VtParser } from "./parser/vt_parser.js";
 import { AceRenderer } from "./renderer/ace_renderer.js";
@@ -69,13 +74,43 @@ export class TerminalImpl implements Terminal {
 	private pendingMouseEncoding: MouseEncoding = MouseEncoding.Default;
 
 	constructor(options?: TerminalOptions) {
+		// Resolve the font option. The contract: bare `createTerminal()` must
+		// render with a bundled font (JetBrains Mono) so consumers don't have
+		// to wire `@font-face` themselves. A consumer can opt OUT by passing
+		// an empty-string `font` AND their own `fontFamily` (or by setting
+		// `font: ""`), in which case we fall back to plain `monospace`.
+		// Any other `font` value is resolved through `BUILTIN_FONTS`; the
+		// resolved family becomes the `fontFamily` baseline (with `monospace`
+		// fallback for graceful degradation while the asset is loading).
+		//
+		// `fontFamily` passed explicitly without a `font` still wins — that
+		// is the escape hatch for consumers that want to manage their own
+		// font stack.
+		const fontId =
+			options?.font === undefined
+				? DEFAULT_FONT_ID
+				: options.font === ""
+					? undefined
+					: options.font;
+		let resolvedFontFamily = options?.fontFamily ?? "monospace";
+		if (fontId !== undefined) {
+			const font = getBuiltinFont(fontId);
+			injectFontFace(font);
+			// Built-in font takes precedence over any consumer-supplied
+			// `fontFamily` (the explicit-opt-out path above sets fontId to
+			// undefined, so this only fires when the consumer asked for a
+			// bundled font).
+			resolvedFontFamily = `'${font.family}', monospace`;
+		}
+
 		// Default options
 		this._options = {
 			cols: options?.cols ?? 80,
 			rows: options?.rows ?? 24,
 			scrollback: options?.scrollback ?? 1000,
 			theme: options?.theme ?? {},
-			fontFamily: options?.fontFamily ?? "monospace",
+			fontFamily: resolvedFontFamily,
+			font: fontId ?? "",
 			fontSize: options?.fontSize ?? 13,
 			allowSelection: options?.allowSelection ?? true,
 		};
@@ -252,6 +287,7 @@ export class TerminalImpl implements Terminal {
 			container,
 			this.bufferNamespace,
 			this._options.fontSize,
+			this._options.fontFamily,
 		);
 
 		// Apply theme
@@ -345,6 +381,35 @@ export class TerminalImpl implements Terminal {
 		applyTheme(theme);
 		clearTruecolorCache();
 		if (this.aceRenderer) {
+			this.aceRenderer.scheduleUpdate();
+		}
+	}
+
+	/**
+	 * Swap to a built-in monospace font by id at runtime.
+	 *
+	 * Look-up resolves through `BUILTIN_FONTS` in `src/fonts/index.ts`; an
+	 * unknown id throws (same shape as `setTheme`'s typo guard). The font's
+	 * `@font-face` rule is lazily injected into the shared
+	 * `<style id="sterk-fonts">` element on first use (idempotent across
+	 * instances), and the renderer is told to apply the new family with
+	 * `monospace` as the fallback so the grid stays legible while the
+	 * woff2 is loading.
+	 *
+	 * We trigger `scheduleUpdate()` rather than a forced repaint: Ace's
+	 * `setOption('fontFamily', ...)` already invalidates the cached cell
+	 * metrics, so the next coalesced rAF flush picks up the new sizing
+	 * without risking the mid-burst zombie-rows scenario that
+	 * `forceRepaint()` would expose.
+	 */
+	setFont(fontId: string): void {
+		const font = getBuiltinFont(fontId);
+		injectFontFace(font);
+		const family = `'${font.family}', monospace`;
+		this._options.font = font.id;
+		this._options.fontFamily = family;
+		if (this.aceRenderer) {
+			this.aceRenderer.setFontFamily(family);
 			this.aceRenderer.scheduleUpdate();
 		}
 	}

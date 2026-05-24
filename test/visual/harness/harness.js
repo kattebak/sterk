@@ -38,6 +38,11 @@ const DEFAULT_OPTIONS = {
 	cols: 80,
 	rows: 24,
 	scrollback: 1000,
+	// Opt out of the bundled-font default so the existing visual baselines
+	// (themes, scroll, alt-screen, etc.) remain pinned to the platform's
+	// generic `monospace` glyphs they were captured against. The
+	// font-rendering scenario explicitly switches in via `setFont(id)`.
+	font: "",
 	fontFamily: "monospace",
 	fontSize: 14,
 	theme: DEFAULT_THEME,
@@ -130,6 +135,35 @@ async function setTheme(themeOrId) {
 	await nextFrame();
 }
 
+/**
+ * Swap the active terminal font and wait for the woff2 asset to finish
+ * loading before resolving. We block on `document.fonts.load(...)` so the
+ * Playwright screenshot captures glyphs rendered with the requested
+ * typeface — not the `monospace` fallback that Ace paints during the
+ * font-load handshake. Without this wait, every baseline would look
+ * identical because the swap-in would happen after the screenshot.
+ */
+async function setFont(fontId) {
+	term.setFont(fontId);
+	const family = term.options?.fontFamily;
+	if (family && document.fonts?.load) {
+		// Use the actual font size for the load probe so the browser picks
+		// the right face variant.
+		const size = term.options?.fontSize ?? 14;
+		try {
+			await document.fonts.load(`${size}px ${family}`);
+		} catch {
+			// best-effort; the load() promise rejects if the URL 404s,
+			// which is itself a meaningful test failure visible in the
+			// screenshot.
+		}
+	}
+	if (typeof term.refresh === "function") {
+		await term.refresh();
+	}
+	await nextFrame();
+}
+
 function dumpState() {
 	const buffer = term.buffer.active;
 	const lines = [];
@@ -194,6 +228,7 @@ window.__sterkTest = {
 	setSize,
 	clear,
 	setTheme,
+	setFont,
 	dumpState,
 	reset,
 	feedBurst,

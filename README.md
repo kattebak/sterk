@@ -100,6 +100,7 @@ See `demo/` for a complete standalone example.
 - `Terminal` — Main terminal interface (write, resize, open, dispose, refresh, setTheme)
 - `Terminal.refresh(): Promise<void>` — Race-safe forced repaint. Waits for any in-flight `write()` burst to flush into the Ace document, then triggers a full repaint. Use this for theme/font swaps or recovery from a render glitch instead of reaching into Ace internals (`renderer.updateFull()`), which can paint a half-synced document.
 - `Terminal.setTheme(themeId: string): void` — Swap to a built-in theme by id at runtime (see [Built-in themes](#built-in-themes)).
+- `Terminal.setFont(fontId: string): void` — Swap to a bundled monospace font by id at runtime (see [Built-in fonts](#built-in-fonts)).
 - `Parser.registerOscHandler(id, handler)` — Register OSC sequence handlers
 - `Buffer` / `BufferLine` / `BufferCell` — Read-only buffer access with full SGR attributes
 - `Theme` — Color theme definition (foreground, background, ANSI palette)
@@ -159,6 +160,65 @@ For the consumer ↔ sterk boundary — what's in contract, what's explicitly ou
 of contract (e.g. reaching into `editor.renderer.updateFull()`), and recipes
 for common needs (forced redraws, container resize, OSC 133, custom input) —
 see [STERK_INTEGRATION.md](./STERK_INTEGRATION.md).
+
+## Built-in fonts
+
+Sterk vendors 5 open-source monospace fonts as `.woff2` assets under
+`assets/fonts/` and ships them with the package. **JetBrains Mono is
+applied automatically by the `Terminal` constructor** — a bare
+`createTerminal()` already renders with a quality, consistent typeface
+on any device. Swap at runtime via `setFont(id)`:
+
+| Id                | Family            | Notes                                                          |
+| ----------------- | ----------------- | -------------------------------------------------------------- |
+| `jetbrains-mono`  | JetBrains Mono    | **Default.** Code ligatures (`!=` → `≠`, `=>` → `⇒`, …).        |
+| `ibm-plex-mono`   | IBM Plex Mono     | Humanist letterforms, no ligatures.                            |
+| `cascadia-mono`   | Cascadia Mono     | Cascadia Code without ligatures (per Microsoft naming).        |
+| `fira-mono`       | Fira Mono         | Mozilla's Fira family, no ligatures.                           |
+| `source-code-pro` | Source Code Pro   | Adobe's narrow monospace — best slot for small phone screens.  |
+
+```typescript
+import { createTerminal, BUILTIN_FONTS } from '@kattebak/sterk';
+
+const term = createTerminal();             // → JetBrains Mono, ready to use
+term.open(document.getElementById('terminal'));
+
+term.setFont('source-code-pro');           // swap at runtime
+
+for (const f of Object.values(BUILTIN_FONTS)) {
+  console.log(f.id, f.family);
+}
+```
+
+Asset URLs are emitted by sterk via `new URL('../../assets/fonts/X.woff2',
+import.meta.url)`. Both Vite/esbuild and Rollup follow this pattern at
+your build time and inline the woff2 into the output — nothing for you to
+configure. The `Terminal` constructor lazily injects one shared
+`@font-face` rule per requested font into a `<style id="sterk-fonts">`
+element on `document.head`.
+
+**Opt out** of the bundled default by passing `font: ""` plus your own
+`fontFamily`:
+
+```typescript
+createTerminal({ font: '', fontFamily: 'Menlo, monospace' });
+```
+
+**Glyph coverage.** The bundled woff2 files are the Latin subsets shipped
+by [@fontsource](https://fontsource.org/) (≤ 25 KB each). Code, prose,
+and the punctuation/arrows used by most TUIs render in-font; line-drawing
+characters (`U+2500-257F`), emoji, and CJK fall through to the consumer's
+system `monospace` (specified as the fallback in the family stack). If
+your application needs in-font box-drawing, override `fontFamily` with a
+full-coverage font of your choice.
+
+**Substitution note.** The user-facing "narrow / phone-screen" slot was
+specified as Iosevka Term, which has no `@fontsource` package. We
+substitute **Source Code Pro** — same OFL-1.1 license, well-tested
+condensed monospace, ~12 KB latin woff2.
+
+All five fonts are licensed under the SIL Open Font License 1.1; per-font
+attribution lives in [`assets/fonts/LICENSES.txt`](./assets/fonts/LICENSES.txt).
 
 ## Visual regression
 

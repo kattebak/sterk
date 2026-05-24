@@ -71,6 +71,8 @@ this doc gets updated too.
 | `Terminal.scrollLines(lines)` | `src/terminal.ts:161` | Scroll the viewport by N lines (positive = down/older, negative = up/newer). |
 | `Terminal.scrollToBottom()` | `src/terminal.ts:168` | Pin the viewport to the bottom of the buffer. |
 | `Terminal.refresh()` | `src/terminal.ts:191` | Race-safe forced repaint. Awaits any in-flight write-burst flush, then asks Ace to re-paint. **This is the canonical "I need a redraw" entry point** — see [Recipes](#recipes). |
+| `Terminal.setTheme(id)` | `src/terminal.ts:341` | Swap to a built-in theme by id. Looks up in `THEMES`, regenerates the per-instance stylesheet, schedules a coalesced repaint. |
+| `Terminal.setFont(id)` | `src/terminal.ts:374` | Swap to a bundled monospace font by id. Lazily injects `@font-face`, updates the renderer family with `monospace` fallback, schedules a coalesced repaint. See [Recipes](#i-want-to-swap-the-bundled-font). |
 | `Terminal.getCellMetrics()` | `src/terminal.ts:286` | Returns `{ width, height }` of a single cell in CSS pixels, or `null` if the renderer hasn't laid out yet. |
 
 ### `Terminal` — read-only accessors
@@ -219,6 +221,43 @@ The input adapter pattern lives in `src/renderer/input.ts`:
 If you need behavior that neither file covers (custom touch gestures,
 multi-key chords), build it on top: listen to your own DOM events and
 call `terminal.send()`.
+
+### "I want to swap the bundled font"
+
+Sterk ships 5 monospace fonts under `assets/fonts/`; the constructor
+defaults to JetBrains Mono. Swap at runtime via `setFont(id)`:
+
+```ts
+import { createTerminal, BUILTIN_FONTS } from "@kattebak/sterk";
+
+const term = createTerminal();             // default: JetBrains Mono
+term.open(document.getElementById("terminal"));
+
+term.setFont("source-code-pro");           // narrow, good for phones
+
+for (const f of Object.values(BUILTIN_FONTS)) {
+  console.log(f.id, f.family);             // build a picker UI
+}
+```
+
+`setFont()` lazily injects an `@font-face` rule into a shared
+`<style id="sterk-fonts">` element (idempotent across instances and
+across repeated calls for the same id), updates the renderer family with
+`monospace` as the fallback, and schedules a coalesced repaint — same
+race-safe path as `setTheme()`.
+
+To **opt out** of the bundled default entirely (e.g. consumer ships its
+own Nerd Font + glyph patch), pass `font: ""` with your own `fontFamily`:
+
+```ts
+createTerminal({ font: "", fontFamily: '"FiraCode Nerd Font", monospace' });
+```
+
+The vendored woff2 files are Latin subsets. Line-drawing characters
+(`U+2500-257F`), emoji, and CJK fall through to your platform's
+`monospace` (sterk always specifies that as the family-stack fallback).
+If you need in-font box-drawing, override `fontFamily` per the snippet
+above.
 
 ### "I need OSC 133 (shell integration)"
 
