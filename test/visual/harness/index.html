@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Sterk Visual-Regression Harness</title>
+		<style>
+			* {
+				box-sizing: border-box;
+			}
+
+			html,
+			body {
+				margin: 0;
+				padding: 0;
+				background: #1e1e1e;
+				color: #d4d4d4;
+				font-family: monospace;
+			}
+
+			/*
+			 * Disable all animations so visual baselines are deterministic.
+			 * Cursor blink / transitions in Ace + sterk would otherwise
+			 * produce per-run pixel diffs.
+			 */
+			*,
+			*::before,
+			*::after {
+				animation-duration: 0s !important;
+				animation-delay: 0s !important;
+				transition-duration: 0s !important;
+				transition-delay: 0s !important;
+				caret-color: transparent !important;
+			}
+
+			#terminal,
+			#terminal .sterk,
+			#terminal .sterk-viewport {
+				width: 100vw;
+				height: 100vh;
+				overflow: hidden;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="terminal" data-testid="terminal"></div>
+		<script type="module" src="./harness.js"></script>
+	</body>
+</html>
