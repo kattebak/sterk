@@ -97,7 +97,8 @@ See `demo/` for a complete standalone example.
 ## Public API
 
 - `createTerminal(options?: TerminalOptions): Terminal` — Create a terminal instance
-- `Terminal` — Main terminal interface (write, resize, open, dispose)
+- `Terminal` — Main terminal interface (write, resize, open, dispose, refresh)
+- `Terminal.refresh(): Promise<void>` — Race-safe forced repaint. Waits for any in-flight `write()` burst to flush into the Ace document, then triggers a full repaint. Use this for theme/font swaps or recovery from a render glitch instead of reaching into Ace internals (`renderer.updateFull()`), which can paint a half-synced document.
 - `Parser.registerOscHandler(id, handler)` — Register OSC sequence handlers
 - `Buffer` / `BufferLine` / `BufferCell` — Read-only buffer access with full SGR attributes
 - `Theme` — Color theme definition (foreground, background, ANSI palette)

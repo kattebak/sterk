@@ -82,6 +82,29 @@ export interface Terminal {
 	scrollToBottom(): void;
 
 	/**
+	 * Force the renderer to repaint after any currently in-flight writes
+	 * have been applied to the document.
+	 *
+	 * Sterk coalesces `write()` → Ace-document updates onto the next
+	 * animation frame. Reaching into Ace's internal `renderer.updateFull()`
+	 * directly can land mid-burst and paint a half-synced document,
+	 * producing duplicated / stale rows ("zombie rows"). `refresh()` is
+	 * the race-safe entry point: it waits for the next coalesced flush,
+	 * then asks the renderer to re-paint.
+	 *
+	 * Typical use cases:
+	 * - Theme or font swap that requires re-paint of every visible row
+	 * - Manual scrollback flush
+	 * - Recovery from a suspected render glitch
+	 *
+	 * In headless mode (terminal not attached via `open()`) this is a
+	 * no-op and resolves immediately.
+	 *
+	 * @returns Promise that resolves once the repaint has been committed.
+	 */
+	refresh?(): Promise<void>;
+
+	/**
 	 * Register a callback to be invoked after each write() completes
 	 * and the buffer has been updated.
 	 *
