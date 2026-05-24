@@ -32,10 +32,22 @@ const THEMES = [
 
 // One screen of mixed output. CJK ideograph (U+4E2D, "中") covers the
 // width-2 cell path; `\r\n` between rows keeps each line on its own row.
+//
+// Extended SGR coverage (see sgr-colors-and-bold scenario for the
+// dedicated regression baseline): includes red/green/yellow/blue palette
+// fgs, bold + underline, AND a combined SGR (`1;33` = bold + yellow)
+// because the original mobux ":5151 no colours, no bold" regression
+// dropped specifically on multi-attribute cells where the renderer's
+// class-joiner produced un-prefixed trailing classes. D4 missed it
+// because the original payload only exercised single-attribute SGRs and
+// the per-test 2% pixel-diff allowance absorbed the small "no-colour
+// muted-theme palette" delta. Adding combined SGR + a bg cell raises
+// the pixel surface enough that any future regression breaks the diff.
 const PAYLOAD = [
 	"\x1b[1muser@host\x1b[m:\x1b[34m~/work\x1b[m$ ls",
 	"\x1b[32mREADME.md\x1b[m  \x1b[34msrc\x1b[m  \x1b[34mtest\x1b[m",
 	"\x1b[33mwarn:\x1b[m something looks off",
+	"\x1b[31m err\x1b[m \x1b[32m ok\x1b[m \x1b[1;33m bold-yellow\x1b[m \x1b[4mul\x1b[m \x1b[42m bg \x1b[m",
 	"plain output line",
 	"wide: 中 ideograph + ascii",
 	"",
@@ -69,7 +81,8 @@ test.describe("D4 steady-state", () => {
 				(window as unknown as HarnessWindow).__sterkTest.dumpState(),
 			);
 			expect(state.lines[0]).toContain("user@host");
-			expect(state.lines[4]).toContain("中");
+			expect(state.lines[3]).toContain("bold-yellow");
+			expect(state.lines[5]).toContain("中");
 
 			await expect(page).toHaveScreenshot(`steady-state-${id}.png`, {
 				fullPage: true,

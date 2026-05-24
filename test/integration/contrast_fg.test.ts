@@ -36,9 +36,12 @@ import { relativeLuminance } from "../../src/util/colors.js";
  * then read `getComputedStyle`. happy-dom evaluates the rules sterk
  * injected via `applyTheme()`.
  *
- * The classes argument is the space-separated string that `vt_mode.ts`
- * emits for a cell — `sterk-bg-0 sterk-fg-default` for our default-fg
- * + explicit-bg case.
+ * The classes argument is the space-separated string Ace's text layer
+ * lands in the DOM for a cell — `ace_sterk-bg-0 ace_sterk-fg-default`
+ * for our default-fg + explicit-bg case. `vt_mode.ts` emits the
+ * `.`-joined token type that Ace explodes into those classes per its
+ * documented wire format; the resolved selectors in `theme.ts` all carry
+ * the `ace_` prefix.
  */
 function computedColorForCellClasses(
 	container: HTMLElement,
@@ -137,12 +140,13 @@ describe("A3 — luminance-contrast fallback for default fg on explicit bg", () 
 		term.open?.(container);
 
 		// Sanity: the cell-class encoding produces `sterk-bg-0` for
-		// `\x1b[40m`. We don't need to write anything to the buffer
-		// because the resolution is purely CSS-driven from the classes
-		// `vt_mode.ts` would emit for such a cell.
+		// `\x1b[40m`, which Ace renders as `ace_sterk-bg-0` in the DOM.
+		// We don't need to write anything to the buffer because the
+		// resolution is purely CSS-driven from the classes the renderer
+		// would land in the DOM for such a cell.
 		const colour = computedColorForCellClasses(
 			container,
-			"sterk-bg-0 sterk-fg-default",
+			"ace_sterk-bg-0 ace_sterk-fg-default",
 		);
 		const fgHex = cssColorToHex(colour);
 		const fgLum = relativeLuminance(fgHex);
@@ -176,7 +180,7 @@ describe("A3 — luminance-contrast fallback for default fg on explicit bg", () 
 
 		const colour = computedColorForCellClasses(
 			container,
-			"sterk-bg-7 sterk-fg-default",
+			"ace_sterk-bg-7 ace_sterk-fg-default",
 		);
 		const fgHex = cssColorToHex(colour);
 		const fgLum = relativeLuminance(fgHex);
@@ -206,7 +210,7 @@ describe("A3 — luminance-contrast fallback for default fg on explicit bg", () 
 		});
 		term.open?.(container);
 
-		// No bg class, no `sterk-fg-default` marker — a plain default
+		// No bg class, no `ace_sterk-fg-default` marker — a plain default
 		// cell. `getComputedStyle` should report the theme default fg
 		// (inherited via `.ace_editor { color: var(--sterk-fg) }`).
 		const colour = computedColorForCellClasses(container, "");
@@ -230,13 +234,13 @@ describe("A3 — luminance-contrast fallback for default fg on explicit bg", () 
 		});
 		term.open?.(container);
 
-		// `sterk-fg-1 sterk-bg-0` = ANSI red on ANSI black. No
-		// `sterk-fg-default` because the fg is SGR-set, so the rule
+		// `ace_sterk-fg-1 ace_sterk-bg-0` = ANSI red on ANSI black. No
+		// `ace_sterk-fg-default` because the fg is SGR-set, so the rule
 		// must not engage. The painted fg should be the palette red
 		// (`#cd0000`).
 		const colour = computedColorForCellClasses(
 			container,
-			"sterk-fg-1 sterk-bg-0",
+			"ace_sterk-fg-1 ace_sterk-bg-0",
 		);
 		const fgHex = cssColorToHex(colour);
 		expect(fgHex).toBe("#cd0000");
@@ -271,7 +275,7 @@ describe("A3 — luminance-contrast fallback for default fg on explicit bg", () 
 			requestAnimationFrame(() => {
 				const colour = computedColorForCellClasses(
 					container,
-					"sterk-bg-rgb-1e1e1e sterk-fg-default",
+					"ace_sterk-bg-rgb-1e1e1e ace_sterk-fg-default",
 				);
 				const fgHex = cssColorToHex(colour);
 				expect(fgHex).toBe("#ffffff");
