@@ -81,6 +81,40 @@ function clear() {
 	return nextFrame();
 }
 
+/**
+ * Emit N synthetic lines back-to-back in a single `term.write()` call so
+ * the parser/renderer must coalesce them onto one rAF tick. Used by the
+ * "after-write-burst" scenario to assert the rAF coalescer + refresh()
+ * leave the document in a clean steady state (no zombie rows, no torn
+ * paints).
+ */
+function feedBurst(n, prefix) {
+	const tag = typeof prefix === "string" ? prefix : "line";
+	const lines = [];
+	for (let i = 0; i < n; i++) {
+		lines.push(`${tag} ${i.toString().padStart(4, "0")}`);
+	}
+	return feedRaw(`${lines.join("\r\n")}\r\n`);
+}
+
+/**
+ * Scroll the viewport to a specific absolute row index, relative to the
+ * buffer's top (row 0 is the oldest scrollback row). Used by the
+ * scrollback scenario to pin the viewport at a known offset before
+ * screenshotting. Returns once the renderer has committed the scroll.
+ */
+async function scrollToRow(absoluteY) {
+	const buffer = term.buffer.active;
+	// scrollLines is relative to current viewportY. Compute the delta to
+	// land on the requested absolute row.
+	const delta = absoluteY - buffer.viewportY;
+	term.scrollLines(delta);
+	if (typeof term.refresh === "function") {
+		await term.refresh();
+	}
+	await nextFrame();
+}
+
 async function setTheme(themeOrId) {
 	// B10/B11: string ids resolve through the built-in registry via the
 	// `Terminal.setTheme(id)` API. An object payload is treated as a raw
@@ -131,6 +165,8 @@ window.__sterkTest = {
 	setTheme,
 	dumpState,
 	reset,
+	feedBurst,
+	scrollToRow,
 	/** Resolves once the harness is ready (terminal mounted + first frame). */
 	ready: nextFrame(),
 };
