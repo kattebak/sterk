@@ -5,6 +5,16 @@
  * - X10 encoding (CSI M <button> <x> <y>)
  * - SGR 1006 encoding (CSI < <button> ; <x> ; <y> M/m)
  *
+ * DEC private mouse modes (driven by `Terminal.handleDecPrivateMode`):
+ * - 1000 — VT200 tracking (press + release only)
+ * - 1002 — Cell-motion tracking (press + release + button-held drag)
+ * - 1003 — All-motion tracking (press + release + every motion event)
+ * - 1006 — SGR encoding (orthogonal; controls *how* events are framed)
+ *
+ * Tracking modes (1000/1002/1003) are mutually exclusive — only one is
+ * active at a time. The encoding (1006 vs default X10) is independent and
+ * applies to whichever tracking mode is current.
+ *
  * References:
  * - https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking
  */
@@ -20,14 +30,47 @@ enum MouseButton {
 }
 
 /**
- * Mouse tracking mode
+ * Mouse tracking mode (DEC 1000 / 1002 / 1003).
+ *
+ * Mutually exclusive — enabling one disables any other. See the DEC
+ * private-mode handler in `terminal.ts` for the protocol wire-up.
+ */
+export enum MouseTrackingMode {
+	/** No mouse tracking — wheel scrolls viewport. */
+	Off = 0,
+	/** DEC 1000 — VT200 tracking: press + release only, no motion. */
+	VT200 = 1000,
+	/** DEC 1002 — Cell-motion tracking: press + release + button-held drag. */
+	CellMotion = 1002,
+	/** DEC 1003 — All-motion tracking: every motion event, regardless of button. */
+	AllMotion = 1003,
+}
+
+/**
+ * Wire encoding for emitted mouse sequences (DEC 1006).
+ *
+ * Orthogonal to {@link MouseTrackingMode} — encoding controls *how* an
+ * event is serialised, not *which* events are emitted.
+ */
+export enum MouseEncoding {
+	/** Legacy X10 byte encoding (CSI M <Cb> <Cx> <Cy>). Default when 1006 is off. */
+	Default = 0,
+	/** DEC 1006 — SGR encoding (CSI < Cb ; Cx ; Cy M/m). */
+	SGR = 1006,
+}
+
+/**
+ * @deprecated Retained for backward compatibility with the pre-Phase-A1
+ * API where tracking and encoding were conflated. New code should use
+ * {@link MouseTrackingMode} and {@link MouseEncoding} via
+ * `setTrackingMode` / `setEncoding`. Mapping:
+ *   - `MouseMode.Off`     → tracking Off,         encoding Default
+ *   - `MouseMode.X10`     → tracking VT200,       encoding Default
+ *   - `MouseMode.SGR1006` → tracking VT200,       encoding SGR
  */
 export enum MouseMode {
-	/** No mouse tracking - wheel scrolls viewport */
 	Off = 0,
-	/** X10 mouse protocol */
 	X10 = 1,
-	/** SGR 1006 mouse protocol (preferred) */
 	SGR1006 = 2,
 }
 
@@ -97,7 +140,8 @@ function getModifiers(event: MouseEvent): number {
  * Mouse handler class
  */
 export class MouseHandler {
-	private mode = MouseMode.Off;
+	private tracking: MouseTrackingMode = MouseTrackingMode.Off;
+	private encoding: MouseEncoding = MouseEncoding.Default;
 	private onDataCallback: ((data: string) => void) | null = null;
 	private onScrollCallback: ((lines: number) => void) | null = null;
 	private lastButton: MouseButton | null = null;
@@ -125,10 +169,54 @@ export class MouseHandler {
 	}
 
 	/**
-	 * Set mouse tracking mode
+	 * Set the tracking mode (DEC 1000 / 1002 / 1003). Mutually exclusive —
+	 * enabling one disables any other. Use {@link MouseTrackingMode.Off} to
+	 * disable tracking entirely.
+	 */
+	setTrackingMode(mode: MouseTrackingMode): void {
+		this.tracking = mode;
+	}
+
+	/**
+	 * Get the current tracking mode. Primarily useful for tests and
+	 * `handleDecPrivateMode` reset semantics (e.g. only clear tracking on
+	 * `?1000l` when the currently-active tracking mode is VT200).
+	 */
+	getTrackingMode(): MouseTrackingMode {
+		return this.tracking;
+	}
+
+	/**
+	 * Set the wire encoding (DEC 1006). Orthogonal to tracking mode.
+	 */
+	setEncoding(encoding: MouseEncoding): void {
+		this.encoding = encoding;
+	}
+
+	/** Get the current wire encoding. Primarily useful for tests. */
+	getEncoding(): MouseEncoding {
+		return this.encoding;
+	}
+
+	/**
+	 * @deprecated Use {@link setTrackingMode} and {@link setEncoding}.
+	 * Kept for back-compat with the conflated pre-Phase-A1 API.
 	 */
 	setMode(mode: MouseMode): void {
-		this.mode = mode;
+		switch (mode) {
+			case MouseMode.Off:
+				this.tracking = MouseTrackingMode.Off;
+				this.encoding = MouseEncoding.Default;
+				break;
+			case MouseMode.X10:
+				this.tracking = MouseTrackingMode.VT200;
+				this.encoding = MouseEncoding.Default;
+				break;
+			case MouseMode.SGR1006:
+				this.tracking = MouseTrackingMode.VT200;
+				this.encoding = MouseEncoding.SGR;
+				break;
+		}
 	}
 
 	/**
@@ -146,22 +234,52 @@ export class MouseHandler {
 	}
 
 	/**
-	 * Handle mousedown events
+	 * Emit a mouse sequence via the configured encoding.
+	 *
+	 * `pressed=false` produces a release event. In legacy X10 encoding,
+	 * release is represented by button=3 (the protocol does not distinguish
+	 * which button was released); in SGR 1006 the original button is kept
+	 * and the trailing `m` marks the event as a release.
 	 */
-	private handleMouseDown = (event: MouseEvent): void => {
-		if (this.mode === MouseMode.Off) return;
+	private emitEvent(
+		button: MouseButton,
+		col: number,
+		row: number,
+		modifiers: number,
+		pressed: boolean,
+	): void {
+		if (!this.onDataCallback) return;
+		if (this.encoding === MouseEncoding.SGR) {
+			this.onDataCallback(
+				generateSGR1006Sequence(button, col, row, modifiers, pressed),
+			);
+		} else {
+			const b = pressed ? button : MouseButton.Release;
+			this.onDataCallback(generateX10Sequence(b, col, row, modifiers));
+		}
+	}
 
+	private cellFor(event: MouseEvent): { col: number; row: number } | null {
 		const metrics = this.getCellMetrics();
-		if (!metrics) return;
-
+		if (!metrics) return null;
 		const rect = this.element.getBoundingClientRect();
-		const { col, row } = getCellCoordinates(
+		return getCellCoordinates(
 			event,
 			metrics.width,
 			metrics.height,
 			rect.left,
 			rect.top,
 		);
+	}
+
+	/**
+	 * Handle mousedown events
+	 */
+	private handleMouseDown = (event: MouseEvent): void => {
+		if (this.tracking === MouseTrackingMode.Off) return;
+
+		const pos = this.cellFor(event);
+		if (!pos) return;
 
 		let button: MouseButton;
 		if (event.button === 0) button = MouseButton.Left;
@@ -171,26 +289,7 @@ export class MouseHandler {
 
 		this.lastButton = button;
 
-		const modifiers = getModifiers(event);
-
-		if (this.mode === MouseMode.X10) {
-			const sequence = generateX10Sequence(button, col, row, modifiers);
-			if (this.onDataCallback) {
-				this.onDataCallback(sequence);
-			}
-		} else if (this.mode === MouseMode.SGR1006) {
-			const sequence = generateSGR1006Sequence(
-				button,
-				col,
-				row,
-				modifiers,
-				true,
-			);
-			if (this.onDataCallback) {
-				this.onDataCallback(sequence);
-			}
-		}
-
+		this.emitEvent(button, pos.col, pos.row, getModifiers(event), true);
 		event.preventDefault();
 	};
 
@@ -198,93 +297,53 @@ export class MouseHandler {
 	 * Handle mouseup events
 	 */
 	private handleMouseUp = (event: MouseEvent): void => {
-		if (this.mode === MouseMode.Off) return;
+		if (this.tracking === MouseTrackingMode.Off) return;
 		if (this.lastButton === null) return;
 
-		const metrics = this.getCellMetrics();
-		if (!metrics) return;
+		const pos = this.cellFor(event);
+		if (!pos) return;
 
-		const rect = this.element.getBoundingClientRect();
-		const { col, row } = getCellCoordinates(
-			event,
-			metrics.width,
-			metrics.height,
-			rect.left,
-			rect.top,
+		this.emitEvent(
+			this.lastButton,
+			pos.col,
+			pos.row,
+			getModifiers(event),
+			false,
 		);
-
-		const modifiers = getModifiers(event);
-
-		if (this.mode === MouseMode.X10) {
-			const sequence = generateX10Sequence(
-				MouseButton.Release,
-				col,
-				row,
-				modifiers,
-			);
-			if (this.onDataCallback) {
-				this.onDataCallback(sequence);
-			}
-		} else if (this.mode === MouseMode.SGR1006) {
-			const sequence = generateSGR1006Sequence(
-				this.lastButton,
-				col,
-				row,
-				modifiers,
-				false,
-			);
-			if (this.onDataCallback) {
-				this.onDataCallback(sequence);
-			}
-		}
 
 		this.lastButton = null;
 		event.preventDefault();
 	};
 
 	/**
-	 * Handle mousemove events (for drag tracking)
+	 * Handle mousemove events.
+	 *
+	 * Emission rules per tracking mode:
+	 *   - VT200 (1000): never emit on motion.
+	 *   - CellMotion (1002): emit only while a button is held (drag).
+	 *   - AllMotion (1003): emit on every motion, button or no button.
 	 */
 	private handleMouseMove = (event: MouseEvent): void => {
-		if (this.mode === MouseMode.Off) return;
-		if (this.lastButton === null) return; // Only track drags
-
-		const metrics = this.getCellMetrics();
-		if (!metrics) return;
-
-		const rect = this.element.getBoundingClientRect();
-		const { col, row } = getCellCoordinates(
-			event,
-			metrics.width,
-			metrics.height,
-			rect.left,
-			rect.top,
-		);
-
-		const modifiers = getModifiers(event) + 32; // Add motion indicator
-
-		if (this.mode === MouseMode.X10) {
-			const sequence = generateX10Sequence(
-				this.lastButton,
-				col,
-				row,
-				modifiers,
-			);
-			if (this.onDataCallback) {
-				this.onDataCallback(sequence);
-			}
-		} else if (this.mode === MouseMode.SGR1006) {
-			const sequence = generateSGR1006Sequence(
-				this.lastButton,
-				col,
-				row,
-				modifiers,
-				true,
-			);
-			if (this.onDataCallback) {
-				this.onDataCallback(sequence);
-			}
+		if (this.tracking === MouseTrackingMode.Off) return;
+		if (this.tracking === MouseTrackingMode.VT200) return;
+		if (
+			this.tracking === MouseTrackingMode.CellMotion &&
+			this.lastButton === null
+		) {
+			return;
 		}
+
+		const pos = this.cellFor(event);
+		if (!pos) return;
+
+		// Motion indicator bit (32) is added to the button code, matching
+		// the legacy xterm convention. For AllMotion with no button held,
+		// xterm reports button code 3 (release) + motion-bit, which is the
+		// value `MouseButton.Release` (3) — same as the encoder sees on
+		// release. Drag-with-button uses the active button code.
+		const baseButton: MouseButton = this.lastButton ?? MouseButton.Release;
+		const modifiers = getModifiers(event) + 32;
+		this.emitEvent(baseButton, pos.col, pos.row, modifiers, true);
 	};
 
 	/**
@@ -294,7 +353,7 @@ export class MouseHandler {
 		event.preventDefault();
 
 		// When mouse tracking is off, scroll the viewport
-		if (this.mode === MouseMode.Off) {
+		if (this.tracking === MouseTrackingMode.Off) {
 			const lines = Math.sign(event.deltaY) * 3; // Scroll 3 lines at a time
 			if (this.onScrollCallback) {
 				this.onScrollCallback(lines);
@@ -303,28 +362,19 @@ export class MouseHandler {
 		}
 
 		// When mouse tracking is on, send mouse wheel sequences
-		const metrics = this.getCellMetrics();
-		if (!metrics) return;
-
-		const rect = this.element.getBoundingClientRect();
-		const { col, row } = getCellCoordinates(
-			event,
-			metrics.width,
-			metrics.height,
-			rect.left,
-			rect.top,
-		);
+		const pos = this.cellFor(event);
+		if (!pos) return;
 
 		// Mouse wheel buttons use special codes (64=up, 65=down)
 		// Cast to MouseButton since wheel codes are outside the enum
 		const button = (event.deltaY > 0 ? 65 : 64) as unknown as MouseButton;
 		const modifiers = getModifiers(event);
 
-		if (this.mode === MouseMode.SGR1006) {
+		if (this.encoding === MouseEncoding.SGR) {
 			const sequence = generateSGR1006Sequence(
 				button,
-				col,
-				row,
+				pos.col,
+				pos.row,
 				modifiers,
 				true,
 			);
@@ -348,7 +398,7 @@ export class MouseHandler {
 	};
 
 	private handleTouchMove = (event: TouchEvent): void => {
-		if (this.mode !== MouseMode.Off) {
+		if (this.tracking !== MouseTrackingMode.Off) {
 			// Don't scroll when mouse tracking is on
 			event.preventDefault();
 			return;
