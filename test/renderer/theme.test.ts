@@ -122,8 +122,11 @@ describe("theme", () => {
 				const css = generateAceThemeCss();
 				// Palette covers 0-255 (see buildPalette()). One contrast
 				// rule per index keeps the generated CSS deterministic.
+				// Selectors carry the `ace_` prefix because Ace's text
+				// layer turns each `.`-separated token type segment into
+				// an `ace_`-prefixed className (see vt_mode.ts header).
 				for (let i = 0; i < 256; i++) {
-					expect(css).toContain(`.sterk-bg-${i}.sterk-fg-default`);
+					expect(css).toContain(`.ace_sterk-bg-${i}.ace_sterk-fg-default`);
 				}
 			});
 
@@ -131,11 +134,11 @@ describe("theme", () => {
 				const css = generateAceThemeCss();
 				// Palette index 0 = ANSI black (#000000) -> light fg.
 				expect(css).toContain(
-					".ace_editor .sterk-bg-0.sterk-fg-default { color: #ffffff !important; }",
+					".ace_editor .ace_sterk-bg-0.ace_sterk-fg-default { color: #ffffff !important; }",
 				);
 				// Palette index 4 = ANSI blue (#0000ee) -> light fg.
 				expect(css).toContain(
-					".ace_editor .sterk-bg-4.sterk-fg-default { color: #ffffff !important; }",
+					".ace_editor .ace_sterk-bg-4.ace_sterk-fg-default { color: #ffffff !important; }",
 				);
 			});
 
@@ -143,11 +146,11 @@ describe("theme", () => {
 				const css = generateAceThemeCss();
 				// Palette index 7 = ANSI white (#e5e5e5) -> dark fg.
 				expect(css).toContain(
-					".ace_editor .sterk-bg-7.sterk-fg-default { color: #000000 !important; }",
+					".ace_editor .ace_sterk-bg-7.ace_sterk-fg-default { color: #000000 !important; }",
 				);
 				// Palette index 15 = ANSI bright white (#ffffff) -> dark fg.
 				expect(css).toContain(
-					".ace_editor .sterk-bg-15.sterk-fg-default { color: #000000 !important; }",
+					".ace_editor .ace_sterk-bg-15.ace_sterk-fg-default { color: #000000 !important; }",
 				);
 			});
 
@@ -159,7 +162,7 @@ describe("theme", () => {
 					palette: ["#f0f0f0"], // override only palette[0]
 				});
 				expect(css).toContain(
-					".ace_editor .sterk-bg-0.sterk-fg-default { color: #000000 !important; }",
+					".ace_editor .ace_sterk-bg-0.ace_sterk-fg-default { color: #000000 !important; }",
 				);
 			});
 		});

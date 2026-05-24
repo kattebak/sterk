@@ -81,32 +81,40 @@ export function generateAceThemeCss(theme: Theme = {}): string {
 		.map((color, index) => `  --sterk-palette-${index}: ${color};`)
 		.join("\n");
 
-	// Generate SGR styling rules for palette colors
+	// Generate SGR styling rules for palette colors.
+	//
+	// IMPORTANT — the `.ace_` prefix is mandatory. Ace's text layer turns a
+	// token `type` like `sterk-fg-1.sterk-bold` into the DOM className
+	// `ace_sterk-fg-1 ace_sterk-bold` via `"ace_" + type.replace(/\./g, " ace_")`
+	// (see ace-builds `src-noconflict/ace.js` ~L17554). The CSS selectors
+	// MUST therefore include `ace_`; earlier `.sterk-fg-N` selectors never
+	// matched in production and SGR styling silently dropped off the page
+	// — see the mobux "no colours, no bold" regression.
 	const fgPaletteRules = fullPalette
 		.map(
 			(color, index) =>
-				`.ace_editor .sterk-fg-${index} { color: ${color} !important; }`,
+				`.ace_editor .ace_sterk-fg-${index} { color: ${color} !important; }`,
 		)
 		.join("\n");
 
 	const bgPaletteRules = fullPalette
 		.map(
 			(color, index) =>
-				`.ace_editor .sterk-bg-${index} { background-color: ${color} !important; }`,
+				`.ace_editor .ace_sterk-bg-${index} { background-color: ${color} !important; }`,
 		)
 		.join("\n");
 
 	// Luminance-contrast fallback for default fg over explicit palette bg.
 	// For each palette bg colour, emit a rule that overrides the colour
 	// to the contrast pick (black or white) WHEN the cell has the
-	// `sterk-fg-default` marker (i.e. no SGR fg + an explicit SGR bg).
-	// Selector specificity: `.ace_editor .sterk-bg-N.sterk-fg-default`
+	// `ace_sterk-fg-default` marker (i.e. no SGR fg + an explicit SGR bg).
+	// Selector specificity: `.ace_editor .ace_sterk-bg-N.ace_sterk-fg-default`
 	// beats the default colour rule `.ace_editor { color: var(--sterk-fg) }`
 	// — same root `.ace_editor` with one extra class chain.
 	const contrastPaletteRules = fullPalette
 		.map(
 			(color, index) =>
-				`.ace_editor .sterk-bg-${index}.sterk-fg-default { color: ${contrastFg(color)} !important; }`,
+				`.ace_editor .ace_sterk-bg-${index}.ace_sterk-fg-default { color: ${contrastFg(color)} !important; }`,
 		)
 		.join("\n");
 
@@ -148,20 +156,20 @@ ${bgPaletteRules}
 /* Luminance-contrast fallback: default fg on explicit palette bg (A3) */
 ${contrastPaletteRules}
 
-/* SGR text attributes */
-.ace_editor .sterk-bold {
+/* SGR text attributes (note '.ace_' prefix — see fgPaletteRules above). */
+.ace_editor .ace_sterk-bold {
   font-weight: bold !important;
 }
 
-.ace_editor .sterk-italic {
+.ace_editor .ace_sterk-italic {
   font-style: italic !important;
 }
 
-.ace_editor .sterk-underline {
+.ace_editor .ace_sterk-underline {
   text-decoration: underline !important;
 }
 
-.ace_editor .sterk-dim {
+.ace_editor .ace_sterk-dim {
   opacity: 0.5 !important;
 }
 
@@ -227,7 +235,11 @@ export function clearTruecolorCache(): void {
  */
 export function injectTruecolorCss(rgb: number, target: "fg" | "bg"): void {
 	const hex = rgb.toString(16).padStart(6, "0");
-	const className = `sterk-${target}-rgb-${hex}`;
+	// Token type emitted by `vt_mode.ts` is `sterk-{fg,bg}-rgb-XXXXXX`;
+	// Ace prepends `ace_` per the wire-format note in `vt_mode.ts`. We
+	// emit / lookup the prefixed name here so this cache key matches the
+	// CSS selectors below (and the runtime DOM className).
+	const className = `ace_sterk-${target}-rgb-${hex}`;
 
 	// Skip if already injected
 	if (truecolorCache.has(className)) {
@@ -242,14 +254,16 @@ export function injectTruecolorCss(rgb: number, target: "fg" | "bg"): void {
 	// Inject CSS rule. For bg classes we additionally emit the
 	// default-fg luminance-contrast fallback (A3): when a cell has no
 	// SGR fg and this RGB bg, force fg to the contrast pick. Matches
-	// the palette-bg path in `generateAceThemeCss`.
+	// the palette-bg path in `generateAceThemeCss`. Both selectors use
+	// the `ace_`-prefixed class names — see the wire-format note in
+	// `vt_mode.ts`.
 	const baseCss =
 		target === "fg"
 			? `.ace_editor .${className} { color: ${color} !important; }`
 			: `.ace_editor .${className} { background-color: ${color} !important; }`;
 	const css =
 		target === "bg"
-			? `${baseCss}\n.ace_editor .${className}.sterk-fg-default { color: ${contrastFg(color)} !important; }`
+			? `${baseCss}\n.ace_editor .${className}.ace_sterk-fg-default { color: ${contrastFg(color)} !important; }`
 			: baseCss;
 
 	// Find or create truecolor style element

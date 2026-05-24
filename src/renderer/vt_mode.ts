@@ -11,6 +11,22 @@
  * - Truecolor (24-bit RGB): CSS classes generated per color (cached)
  * - Inverse: swap fg/bg classes
  * - Dim: add "sterk-dim" class (rendered via opacity in CSS)
+ *
+ * IMPORTANT — Ace token-type wire format:
+ * Ace's Text layer turns the token `type` field into a span className via
+ *   `"ace_" + type.replace(/\./g, " ace_")`
+ * (see ace-builds `src-noconflict/ace.js` ~L17554). That contract means:
+ *   - A single `.` separates segments (each segment gets the `ace_` prefix).
+ *   - Spaces are NOT treated as separators — they pass through literally,
+ *     leaving everything after the first space without the `ace_` prefix.
+ *
+ * Sterk's CSS therefore targets the prefixed selectors (`.ace_sterk-fg-N`,
+ * `.ace_sterk-bold`, …) and `buildCellClassName` joins segments with `.`,
+ * not with a space. The bug shape this guards against: a space-joined
+ * `"sterk-fg-1 sterk-bold"` would land in the DOM as
+ * `class="ace_sterk-fg-1 sterk-bold"` — `sterk-bold` (no prefix) does not
+ * match `.ace_sterk-bold` and SGR styling silently drops off the page
+ * (mobux issue: colours + bolding missing on :5151).
  */
 
 import type { Ace } from "ace-builds";
@@ -20,7 +36,7 @@ import type { BufferNamespaceImpl } from "../buffer/scroll_buffer.js";
  * Token representing a run of cells with identical attributes
  */
 interface VtToken {
-	type: string; // CSS class names (space-separated)
+	type: string; // CSS class names (`.`-joined, see Ace wire-format note above)
 	value: string; // Text content
 }
 
@@ -176,7 +192,7 @@ function buildCellClassName(cell: import("../types.js").BufferCell): string {
 	// override the colour when paired with an explicit bg class. The
 	// bg-painting CSS rule wins on specificity for `background-color`
 	// because it is unique; the contrast rule wins on `color` because it
-	// is `.sterk-bg-N.sterk-fg-default { color: ... }` (two-class
+	// is `.ace_sterk-bg-N.ace_sterk-fg-default { color: ... }` (two-class
 	// selector beats the single-class default `.ace_editor { color: ... }`).
 	if (fgMode === 0 && bgMode !== 0) {
 		classes.push("sterk-fg-default");
@@ -196,5 +212,9 @@ function buildCellClassName(cell: import("../types.js").BufferCell): string {
 		classes.push("sterk-dim");
 	}
 
-	return classes.join(" ");
+	// Join with `.` (NOT space): Ace's text layer turns the token type into a
+	// className via `"ace_" + type.replace(/\./g, " ace_")`, so each `.`
+	// becomes the boundary between two `ace_`-prefixed classes. See the
+	// "Ace token-type wire format" note in this file's header.
+	return classes.join(".");
 }
