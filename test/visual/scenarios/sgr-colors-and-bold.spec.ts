@@ -125,10 +125,9 @@ test.describe("SGR colour + bold + bg — regression baseline", () => {
 			expect(flat).toContain("ace_sterk-bg-1"); // red bg
 
 			// ── Pixel baseline ──────────────────────────────────────────
-			await expect(page).toHaveScreenshot(
-				`sgr-colors-and-bold-${id}.png`,
-				{ fullPage: true },
-			);
+			await expect(page).toHaveScreenshot(`sgr-colors-and-bold-${id}.png`, {
+				fullPage: true,
+			});
 		});
 	}
 });
