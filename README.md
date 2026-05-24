@@ -105,6 +105,11 @@ See `demo/` for a complete standalone example.
 
 See `src/types.ts` for full API documentation with JSDoc comments and examples.
 
+For the consumer ↔ sterk boundary — what's in contract, what's explicitly out
+of contract (e.g. reaching into `editor.renderer.updateFull()`), and recipes
+for common needs (forced redraws, container resize, OSC 133, custom input) —
+see [STERK_INTEGRATION.md](./STERK_INTEGRATION.md).
+
 ## Design principles
 
 - **Clean-room core.** The VT parser is written from public specs (Paul Williams' state machine, XTerm Control Sequences, ECMA-48). No code lifted from other emulators.
