@@ -93,6 +93,22 @@ export class AceRenderer {
 			displayIndentGuides: false,
 		});
 
+		// Drop Ace's default 4px content padding. Terminals deliver text
+		// at exact cell coordinates (col 0 == first column); any non-zero
+		// padding shifts the grid sideways and eats horizontal cells the
+		// consumer thinks it has. The default `setPadding(4)` is meant
+		// for code editors where readability beats parity.
+		this.editor.renderer.setPadding(0);
+
+		// Hide Ace's vertical scrollbar. The terminal has its own scroll
+		// model (consumer wires gestures / keys to `scrollLines()`), and
+		// the reserved scrollbar gutter (~15px on most browsers) is the
+		// largest source of horizontal cell-fit drift on small screens.
+		// Mobile consumers in particular expect the right-most cell to
+		// sit at the container's right edge — leaving the scrollbar in
+		// place clips characters or forces a `cols - N` fudge factor.
+		this.injectScrollbarHideCss();
+
 		// Set read-only (terminal is not an editor)
 		this.editor.setReadOnly(true);
 
@@ -211,6 +227,62 @@ export class AceRenderer {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Compute how many terminal cells fit in the current scroller area.
+	 *
+	 * Reads Ace's already-measured scroller size (post-padding,
+	 * post-scrollbar-reservation) plus the live cell metrics, so the
+	 * answer is the *actual* grid the renderer can paint without
+	 * clipping — not the container size divided by cell width.
+	 *
+	 * Returns `null` until the editor has measured itself at least once
+	 * (e.g. before `open()` has run, or before the first rAF flush).
+	 *
+	 * Use this in preference to `clientWidth / cellWidth` math: it
+	 * already accounts for Ace's internal padding (we zero it but a
+	 * future change could re-introduce it) and any reserved scrollbar
+	 * gutter, so the consumer's `cols` matches what is rendered.
+	 */
+	getViewportCellCount(): { cols: number; rows: number } | null {
+		// biome-ignore lint/suspicious/noExplicitAny: Ace's internal $size and $padding aren't in the public typings.
+		const r = this.editor.renderer as any;
+		const metrics = this.getCellMetrics();
+		if (!metrics) return null;
+
+		const size = r.$size as
+			| { scrollerWidth?: number; scrollerHeight?: number }
+			| undefined;
+		const padding = typeof r.$padding === "number" ? r.$padding : 0;
+		const scrollerWidth = size?.scrollerWidth ?? 0;
+		const scrollerHeight = size?.scrollerHeight ?? 0;
+
+		if (scrollerWidth <= 0 || scrollerHeight <= 0) return null;
+
+		const usableWidth = Math.max(0, scrollerWidth - 2 * padding);
+		const cols = Math.max(1, Math.floor(usableWidth / metrics.width));
+		const rows = Math.max(1, Math.floor(scrollerHeight / metrics.height));
+		return { cols, rows };
+	}
+
+	/**
+	 * Inject the CSS that hides Ace's vertical scrollbar inside this
+	 * renderer's wrapper. Scoped to `.sterk .ace_scrollbar-v` so it
+	 * doesn't affect other Ace instances on the page (e.g. an editor
+	 * embedded next to a terminal). Idempotent across instances.
+	 */
+	private injectScrollbarHideCss(): void {
+		const id = "sterk-scrollbar-hide";
+		if (typeof document === "undefined") return;
+		if (document.getElementById(id)) return;
+		const style = document.createElement("style");
+		style.id = id;
+		style.textContent = `
+.sterk .ace_scrollbar-v { display: none !important; }
+.sterk .ace_scrollbar-h { display: none !important; }
+`.trim();
+		document.head.appendChild(style);
 	}
 
 	/**
