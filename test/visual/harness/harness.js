@@ -158,6 +158,37 @@ async function reset() {
 	await nextFrame();
 }
 
+/**
+ * Shrink the host container by `pxFromBottom` pixels (sets its CSS
+ * `height` to `100vh - pxFromBottom`) and then SYNCHRONOUSLY call
+ * `getViewportCellCount()` followed by `resize(cols, rows)` using the
+ * result. Returns the new grid the terminal was resized to.
+ *
+ * This reproduces the mobux Pixel-7 "bottom-cut-off" scenario where a
+ * flex sibling (the mobile input bar) appears, shrinks the terminal's
+ * box, fires a synchronous resize event, and the consumer must
+ * immediately answer "how many rows fit now?". Without the
+ * `editor.resize(true)` inside `getViewportCellCount()`, that question
+ * is answered against the stale pre-shrink `$size` and the bottom rows
+ * end up off-screen.
+ *
+ * The test that drives this method captures the post-call screenshot:
+ * if the API is correct, the LAST visible row in the buffer is the
+ * last row that actually fits, with no overflow below the scroller.
+ */
+function shrinkAndResyncGrid(pxFromBottom) {
+	container.style.height = `calc(100vh - ${pxFromBottom}px)`;
+	// NOTE: deliberately no `await nextFrame()` here — the whole point is
+	// to call `getViewportCellCount()` SYNCHRONOUSLY after the CSS change
+	// so we exercise the timing path. happy-dom's ResizeObserver hasn't
+	// fired yet either way.
+	const grid = term.getViewportCellCount?.();
+	if (grid) {
+		term.resize(grid.cols, grid.rows);
+	}
+	return Promise.resolve(grid ?? null);
+}
+
 window.__sterkTest = {
 	feedRaw,
 	setSize,
@@ -167,6 +198,7 @@ window.__sterkTest = {
 	reset,
 	feedBurst,
 	scrollToRow,
+	shrinkAndResyncGrid,
 	/** Resolves once the harness is ready (terminal mounted + first frame). */
 	ready: nextFrame(),
 };
