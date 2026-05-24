@@ -500,14 +500,33 @@ export class AceRenderer {
 	}
 
 	/**
-	 * Update viewport scroll position
+	 * Update viewport scroll position.
+	 *
+	 * We use Ace's session.setScrollTop(pixels) directly rather than
+	 * editor.scrollToLine(row, ...). scrollToLine is a no-op when the
+	 * target row is already inside Ace's visible range — which is the
+	 * case for terminal use, where the document is only marginally
+	 * larger than the viewport (active rows + a few lines of
+	 * scrollback). The result was that as soon as the buffer grew past
+	 * `rows` lines, the active screen (which sits at the bottom of the
+	 * document) was clipped below the visible area while the older
+	 * scrollback continued to occupy the top.
+	 *
+	 * Pixel-anchoring scrollTop to viewportY * lineHeight forces the
+	 * top of the visible area to align with the top of the active
+	 * screen on every update, which is exactly the terminal semantic.
 	 */
 	private updateScroll(): void {
-		const buffer = this.buffer;
-		const viewportY = buffer.viewportY;
-
-		// Scroll to show the viewport
-		this.editor.scrollToLine(viewportY, true, false, () => {});
+		const viewportY = this.buffer.viewportY;
+		const lineHeight = this.editor.renderer.lineHeight;
+		if (lineHeight > 0) {
+			this.session.setScrollTop(viewportY * lineHeight);
+		} else {
+			// Pre-measure fallback (e.g. before first paint). scrollToLine
+			// is harmless here because the document and viewport are both
+			// effectively zero-height.
+			this.editor.scrollToLine(viewportY, false, false, () => {});
+		}
 	}
 
 	/**
