@@ -288,6 +288,34 @@ export class ScrollBuffer implements Buffer {
 		return this._viewportY;
 	}
 
+	/**
+	 * Absolute row index of the topmost row of the live screen.
+	 *
+	 * The live screen always occupies the bottom `rows` lines of the
+	 * buffer; everything above it is scrollback. CSI sequences whose
+	 * coordinates are screen-relative (CUP, HVP, ED, EL, …) must
+	 * translate viewport-relative (0-based) rows to absolute row indices
+	 * by adding this offset before touching the buffer — otherwise a
+	 * "move to row N" after the buffer has grown past `rows` lands in
+	 * scrollback instead of on the live screen.
+	 *
+	 * Pinned to `Math.max(0, lines.length - rows)` so:
+	 *  - empty/cold buffer (`lines.length === rows`)        → 0
+	 *  - alt screen (scrollback disabled)                   → 0
+	 *  - normal screen with N rows of scrollback above live → N
+	 *
+	 * Regression context: the tmux/zsh "magenta status bar" duplication
+	 * on Pixel 7 (mobux #N) was the CSI CUP / HVP / ED handlers passing
+	 * `p1 - 1` as an absolute index instead of a viewport-relative one.
+	 * Each `\x1b[<rows>;1H` from a status redraw landed at the same
+	 * absolute row, so as content scrolled the previous status froze in
+	 * scrollback and a new one painted at the (now-different) absolute
+	 * row — accumulating one stale bar per refresh.
+	 */
+	get liveTop(): number {
+		return Math.max(0, this.lines.length - this.rows);
+	}
+
 	getLine(y: number): BufferLine | null {
 		if (y < 0 || y >= this.lines.length) {
 			return null;

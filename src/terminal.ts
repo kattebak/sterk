@@ -594,21 +594,51 @@ export class TerminalImpl implements Terminal {
 			case 0x48: // CUP - Cursor Position
 			case 0x66: // HVP - Horizontal and Vertical Position
 				{
-					const row = p1 - 1; // 1-based to 0-based
+					// VT100 CUP / HVP coordinates are 1-based and **relative to
+					// the visible screen** — NOT to the buffer's absolute line
+					// index. The scrollback ring keeps the live screen at the
+					// bottom `rows` lines (offset = `liveTop`); we must add
+					// that offset, otherwise `\x1b[<rows>;1H` from a status-
+					// bar redraw lands on a scrollback line and the previous
+					// status freezes on-screen. Each refresh appends another
+					// stale bar — which is what produced the "magenta status
+					// bar duplicates 3×" the user reported in mobux.
+					const row = p1 - 1; // 1-based to 0-based, viewport-relative
 					const col = p2 - 1;
+					const absRow = this.scrollBuffer.liveTop + row;
 					this.scrollBuffer.setCursor(
 						Math.max(0, Math.min(col, this.cols - 1)),
-						Math.max(0, Math.min(row, this.rows - 1)),
+						Math.max(
+							this.scrollBuffer.liveTop,
+							Math.min(absRow, this.scrollBuffer.liveTop + this.rows - 1),
+						),
 					);
 				}
 				break;
 
 			case 0x4a: // ED - Erase in Display
-				this.eraseInDisplay(p1);
+				// Per ECMA-48 §8.3.39, missing parameter defaults to **0**
+				// (erase from cursor to end of display). The outer `p1` falls
+				// back to 1, which is the right default for cursor-movement
+				// commands (CUU/CUD/CUP/...) but the WRONG default for ED.
+				// Routing `\x1b[J` as ED-mode-1 (erase above cursor) instead
+				// of ED-mode-0 (erase below) corrupts the screen during any
+				// `clear()`-style sequence sent without an explicit parameter.
+				this.eraseInDisplay(params[0]?.[0] ?? 0);
 				break;
 
 			case 0x4b: // EL - Erase in Line
-				this.eraseInLine(p1);
+				// Per ECMA-48 §8.3.41, missing parameter defaults to **0**
+				// (erase from cursor to end of line). Pre-fix, `\x1b[K`
+				// (the textbook "erase to end of line" tmux/zsh status
+				// redraws emit) was routed as EL-mode-1 (erase to LEFT of
+				// cursor) because `p1` falls back to 1. That blanked the
+				// stale prompt prefix instead of the tail, leaving stale
+				// chars on the right end of the row — one of the two bugs
+				// that produced the mobux "magenta status bar duplicates"
+				// regression (the other being CUP-as-absolute, fixed
+				// above).
+				this.eraseInLine(params[0]?.[0] ?? 0);
 				break;
 
 			case 0x68: // SM - Set Mode (CSI ? ... h)
