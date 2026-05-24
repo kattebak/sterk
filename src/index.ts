@@ -30,12 +30,15 @@ export type {
 export {
 	ANSI_COLORS,
 	buildPalette,
+	contrastFg,
 	hexToPalette,
 	hexToRgb,
+	LUMINANCE_THRESHOLD,
 	type PaletteIndex,
 	paletteToHex,
 	paletteToRgb,
 	type RGB,
+	relativeLuminance,
 	rgbToHex,
 	rgbToPalette,
 } from "./util/colors.js";
