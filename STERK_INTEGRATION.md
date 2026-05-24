@@ -240,11 +240,31 @@ for (const f of Object.values(BUILTIN_FONTS)) {
 }
 ```
 
-`setFont()` lazily injects an `@font-face` rule into a shared
+`setFont()` lazily injects **two** `@font-face` rules into a shared
 `<style id="sterk-fonts">` element (idempotent across instances and
 across repeated calls for the same id), updates the renderer family with
 `monospace` as the fallback, and schedules a coalesced repaint — same
-race-safe path as `setTheme()`.
+race-safe path as `setTheme()`. The two rules:
+
+1. The **primary** face — a subset of the upstream regular weight that
+   covers Basic Latin, Latin-1/Extended-A, plus the TUI ranges the
+   upstream ships natively (Box Drawing, Block Elements, Geometric
+   Shapes, Arrows, Dingbats where present).
+2. A shared **symbol-fallback** face (`SterkTUISymbols`, a renamed
+   subset of DejaVu Sans Mono per the Bitstream Vera license) aliased
+   under the same family name but constrained via `unicode-range` to
+   `U+2190-21FF, U+2500-257F, U+2580-259F, U+25A0-25FF, U+2700-27BF`.
+   The browser only downloads it on first use, only resolves to it for
+   code points the primary woff2's cmap lacks, and shares it across
+   every primary family (downloaded at most once per page).
+
+This means TUI characters Claude Code relies on heavily — box-drawing
+borders (`─ ┌ ┐ │`), block elements (`▌ ▘ █`), geometric shapes
+(`● ◆ ▶`), arrows (`→ ← ↑ ↓`), and heavy dingbats (`✱ ✓ ➜ ✶`) —
+all render in a properly-designed monospace face, not the OS-default
+fallback they would otherwise drop down to. (See `assets/fonts/LICENSES.txt`
+for the full per-font attribution including the Bitstream Vera notice
+for `SterkTUISymbols.woff2`.)
 
 To **opt out** of the bundled default entirely (e.g. consumer ships its
 own Nerd Font + glyph patch), pass `font: ""` with your own `fontFamily`:
@@ -252,12 +272,6 @@ own Nerd Font + glyph patch), pass `font: ""` with your own `fontFamily`:
 ```ts
 createTerminal({ font: "", fontFamily: '"FiraCode Nerd Font", monospace' });
 ```
-
-The vendored woff2 files are Latin subsets. Line-drawing characters
-(`U+2500-257F`), emoji, and CJK fall through to your platform's
-`monospace` (sterk always specifies that as the family-stack fallback).
-If you need in-font box-drawing, override `fontFamily` per the snippet
-above.
 
 ### "I need OSC 133 (shell integration)"
 
