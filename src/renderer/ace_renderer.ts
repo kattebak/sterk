@@ -38,7 +38,18 @@ export class AceRenderer {
 	private session: Ace.EditSession;
 	private viewportDiv: HTMLElement;
 	private wrapper: HTMLElement;
-	private updateScheduled = false;
+	/**
+	 * Promise that resolves after the next coalesced rAF flush completes
+	 * (buffer→document sync + cursor + scroll). Shared across all writes
+	 * that land in the same tick. Becomes null again once the rAF fires.
+	 *
+	 * Acts as both the "is an update scheduled?" flag and the barrier that
+	 * `refresh()` awaits before triggering Ace's repaint, so a forced
+	 * redraw never lands on a half-synced document.
+	 */
+	private updatePromise: Promise<void> | null = null;
+	private updateResolve: (() => void) | null = null;
+	private disposed = false;
 	private resizeObserver: ResizeObserver | null = null;
 	private resizeFrameHandle: number | null = null;
 	private lastObservedSize: { width: number; height: number } | null = null;
@@ -226,19 +237,60 @@ export class AceRenderer {
 	}
 
 	/**
-	 * Schedule a buffer → document sync
-	 * Uses requestAnimationFrame to batch updates
+	 * Schedule a buffer → document sync.
+	 *
+	 * Uses `requestAnimationFrame` to coalesce a burst of `write()` calls
+	 * into a single flush. The returned promise resolves once that flush
+	 * has applied buffer state to the Ace document (cursor + scroll
+	 * included). All callers in the same tick share the same promise.
+	 *
+	 * Promise-returning is additive — existing code that ignores the
+	 * return value (most call sites) is unaffected. `refresh()` uses the
+	 * promise to wait for an in-flight write burst before painting.
 	 */
-	scheduleUpdate(): void {
-		if (this.updateScheduled) return;
+	scheduleUpdate(): Promise<void> {
+		if (this.updatePromise) return this.updatePromise;
 
-		this.updateScheduled = true;
+		this.updatePromise = new Promise<void>((resolve) => {
+			this.updateResolve = resolve;
+		});
+		const promise = this.updatePromise;
+
 		requestAnimationFrame(() => {
-			this.updateScheduled = false;
+			const resolve = this.updateResolve;
+			this.updatePromise = null;
+			this.updateResolve = null;
+
+			if (this.disposed) {
+				resolve?.();
+				return;
+			}
+
 			this.syncBufferToDocument();
 			this.updateCursor();
 			this.updateScroll();
+			resolve?.();
 		});
+
+		return promise;
+	}
+
+	/**
+	 * Force Ace to re-paint every visible row from the current document.
+	 *
+	 * IMPORTANT: callers must only invoke this AFTER the buffer→document
+	 * sync has completed (i.e. after the rAF flush). Calling it mid-burst
+	 * paints a half-synced document and produces zombie rows. The public
+	 * entry point that enforces that ordering is `Terminal.refresh()`.
+	 */
+	forceRepaint(): void {
+		if (this.disposed) return;
+		// Ace's VirtualRenderer.updateFull(force) re-paints every visible
+		// row. We pass `true` to force a layer-rebuild even if Ace thinks
+		// nothing changed (e.g. a theme swap or font change). Behind the
+		// scenes Ace schedules the actual paint on its own internal
+		// rAF — see updateFull → scheduleRender.
+		this.editor.renderer.updateFull(true);
 	}
 
 	/**
@@ -382,6 +434,8 @@ export class AceRenderer {
 	 * Clean up
 	 */
 	dispose(): void {
+		this.disposed = true;
+
 		// Tear down the resize observer first so no callback can race the
 		// editor destruction.
 		if (this.resizeObserver) {
@@ -396,6 +450,13 @@ export class AceRenderer {
 			this.resizeFrameHandle = null;
 		}
 		this.lastObservedSize = null;
+
+		// Resolve any pending update promise so awaiters (e.g. a
+		// `refresh()` blocked on the next rAF flush) don't dangle.
+		const pending = this.updateResolve;
+		this.updateResolve = null;
+		this.updatePromise = null;
+		pending?.();
 
 		this.editor.destroy();
 		if (this.viewportDiv.parentNode) {

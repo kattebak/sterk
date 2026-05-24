@@ -172,6 +172,34 @@ export class TerminalImpl implements Terminal {
 		}
 	}
 
+	/**
+	 * Force the renderer to repaint after any currently in-flight writes
+	 * have been applied to the document.
+	 *
+	 * Sterk batches `write()` → Ace-document updates on the next
+	 * animation frame. A naive "force repaint" call (e.g. reaching into
+	 * Ace's `renderer.updateFull()`) can land mid-burst and paint a
+	 * half-synced document — that's the "zombie rows" symptom mobux PR
+	 * #79 produced. `refresh()` is the race-safe entry point: it awaits
+	 * the next coalesced flush, then asks Ace to re-paint.
+	 *
+	 * In headless mode (terminal not opened to a DOM container) this is
+	 * a no-op and resolves immediately.
+	 *
+	 * @returns Promise that resolves once the repaint has been committed.
+	 */
+	async refresh(): Promise<void> {
+		if (!this.aceRenderer) return;
+		// Wait for any in-flight write burst to flush into the document.
+		// scheduleUpdate() returns the existing pending promise if one is
+		// in flight, or queues a fresh rAF if not — either way, awaiting
+		// it guarantees buffer→document sync is complete before we paint.
+		await this.aceRenderer.scheduleUpdate();
+		// Now safe to force Ace's repaint: the document reflects the
+		// buffer steady state, no parser writes in flight.
+		this.aceRenderer?.forceRepaint();
+	}
+
 	onWriteParsed(callback: () => void): Disposable {
 		this.emitter.on("write-parsed", callback);
 		return {
