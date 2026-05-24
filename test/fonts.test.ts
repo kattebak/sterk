@@ -164,5 +164,51 @@ describe("built-in fonts", () => {
 			term.dispose();
 			container.parentNode?.removeChild(container);
 		});
+
+		// Defends the TUI-coverage decision: every primary @font-face must
+		// be paired with a symbol-fallback face under the SAME family name
+		// constrained by `unicode-range` to the symbol blocks. Without
+		// this, glyphs the primary woff2 lacks (heavy dingbats, geometric
+		// shapes) silently fall back to the system 'monospace' default —
+		// the PR #31 regression Sterk shipped on 2.6.0.
+		it("injects a symbol-fallback @font-face with unicode-range alongside each primary", () => {
+			document.getElementById("sterk-fonts")?.remove();
+
+			const container = document.createElement("div");
+			document.body.appendChild(container);
+			const term = createTerminal();
+			term.open?.(container);
+
+			// Cycle through every font; each should add both the primary
+			// face and the symbol-fallback face under the same family.
+			for (const font of ALL) {
+				term.setFont?.(font.id);
+				const css = document.getElementById("sterk-fonts")?.textContent ?? "";
+
+				// Both @font-face rules name the same family.
+				const familyMatches = css.match(
+					new RegExp(
+						`font-family:\\s*'${font.family.replace(/[-\s]/g, ".")}'`,
+						"g",
+					),
+				);
+				expect(
+					familyMatches?.length ?? 0,
+					`expected at least 2 @font-face rules for '${font.family}' (primary + symbol fallback)`,
+				).toBeGreaterThanOrEqual(2);
+
+				// The symbol-fallback face references SterkTUISymbols and
+				// declares unicode-range covering box-drawing + dingbats.
+				expect(css).toContain("SterkTUISymbols");
+				expect(css).toContain("unicode-range");
+				expect(css).toMatch(/U\+2500-257F/); // box drawing
+				expect(css).toMatch(/U\+2700-27BF/); // dingbats
+				expect(css).toMatch(/U\+25A0-25FF/); // geometric shapes
+				expect(css).toMatch(/U\+2190-21FF/); // arrows
+			}
+
+			term.dispose();
+			container.parentNode?.removeChild(container);
+		});
 	});
 });

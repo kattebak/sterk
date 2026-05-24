@@ -193,6 +193,74 @@ async function reset() {
 }
 
 /**
+ * Returns the computed `font-family` of the first Ace text layer cell —
+ * i.e. the `font-family` the renderer would draw a glyph with right now.
+ *
+ * Used by the font-coverage assertion test to confirm that after
+ * `setFont(id)` the rendered cells actually inherit the requested family
+ * (e.g. `'JetBrains Mono', monospace`) and have NOT silently fallen back
+ * to the bare `monospace` system fallback because the woff2 failed to
+ * load or the @font-face never resolved.
+ *
+ * Pixel-diff thresholds can mask a font substitution at small sizes
+ * (system monospace and JetBrains Mono look ALMOST identical for plain
+ * ASCII); this DOM probe is the assertion that catches the gap. Same
+ * pattern as today's color/bold regression — the screenshot looked fine
+ * but the DOM said otherwise.
+ */
+function probeRenderedFontFamily() {
+	const layer = container.querySelector(".ace_text-layer .ace_line");
+	if (!layer) return null;
+	return globalThis.getComputedStyle(layer).fontFamily;
+}
+
+/**
+ * Probe `document.fonts.check()` for the requested code point under the
+ * active terminal family. Returns `true` only if a loaded face under
+ * that family claims the glyph (primary OR the symbol-fallback face
+ * sterk injects alongside). When this returns `true` for box-drawing
+ * AND a dingbat that the primary woff2 demonstrably lacks (e.g. ✱
+ * U+2731), we have proven that the symbol-fallback unicode-range face
+ * is wired up correctly.
+ *
+ * `document.fonts.check(font, text)` is the spec-defined way to ask
+ * "would the font system serve this string from a loaded face?". It
+ * returns `false` if any code point in `text` would fall through to the
+ * generic `monospace` system font — which is the exact failure mode
+ * PR #31's latin-only subsets exhibited for box-drawing characters.
+ */
+function probeFontHasGlyph(text) {
+	const family = term.options?.fontFamily;
+	if (!family || !globalThis.document?.fonts?.check) return false;
+	const size = term.options?.fontSize ?? 14;
+	return globalThis.document.fonts.check(`${size}px ${family}`, text);
+}
+
+/**
+ * Returns the offset width of the n-th character cell on the row that
+ * contains `marker`. We render the payload such that each row begins
+ * with a 3-char ASCII marker so the spec can locate the right line
+ * without depending on Ace's internal coordinates.
+ *
+ * Used as a secondary signal: if a glyph fell back to system monospace
+ * (different x-advance), the cell offsetWidth differs from the ASCII
+ * cells around it. Combined with `probeFontHasGlyph` this lets the
+ * spec catch fallback even when getComputedStyle reports the right
+ * family.
+ */
+function probeRowCellWidths(marker) {
+	const layer = container.querySelector(".ace_text-layer");
+	if (!layer) return null;
+	const lines = Array.from(layer.querySelectorAll(".ace_line"));
+	const row = lines.find((el) => (el.textContent ?? "").startsWith(marker));
+	if (!row) return null;
+	const rect = row.getBoundingClientRect();
+	const chars = (row.textContent ?? "").length;
+	if (chars === 0) return null;
+	return { width: rect.width, chars, perChar: rect.width / chars };
+}
+
+/**
  * Shrink the host container by `pxFromBottom` pixels (sets its CSS
  * `height` to `100vh - pxFromBottom`) and then SYNCHRONOUSLY call
  * `getViewportCellCount()` followed by `resize(cols, rows)` using the
@@ -234,6 +302,9 @@ window.__sterkTest = {
 	feedBurst,
 	scrollToRow,
 	shrinkAndResyncGrid,
+	probeRenderedFontFamily,
+	probeFontHasGlyph,
+	probeRowCellWidths,
 	/** Resolves once the harness is ready (terminal mounted + first frame). */
 	ready: nextFrame(),
 };

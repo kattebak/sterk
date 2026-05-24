@@ -25,9 +25,21 @@ npm install @kattebak/sterk
 
 ## Size
 
-Sterk is lightweight — under **53 kB packed** (including Ace as a peer dependency).
+Sterk packs at around **305 kB** total (Ace is a peer dependency, not bundled). The breakdown:
 
-Run `npm run size` to verify the current bundle size against the 75 kB budget.
+- **~100 kB** — JS + `.d.ts` for the renderer, VT core, themes, and fonts registry.
+- **~200 kB** — vendored fonts under `assets/fonts/`: five TUI-coverage subsets
+  (JetBrains Mono, IBM Plex Mono, Cascadia Mono, Fira Mono, Source Code Pro)
+  at 25–55 kB each, plus a shared ~25 kB `SterkTUISymbols.woff2` fallback
+  that supplies the box-drawing, dingbats, geometric, and arrow glyphs the
+  primary fonts lack natively (see [`assets/fonts/LICENSES.txt`](./assets/fonts/LICENSES.txt)).
+
+The font assets are static — the consumer's bundler hashes and emits them
+as separate files, so the JS payload the browser parses is still ~100 kB.
+The browser downloads font files lazily and the symbol fallback is shared
+across every primary family (downloaded at most once per page).
+
+Run `npm run size` to verify the current bundle size against the 350 kB budget.
 
 ## Demo
 
