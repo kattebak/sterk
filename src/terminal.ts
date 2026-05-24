@@ -17,7 +17,11 @@ import { AceRenderer } from "./renderer/ace_renderer.js";
 import { InputHandler } from "./renderer/input.js";
 import type { Link } from "./renderer/links.js";
 import { LinkDetector } from "./renderer/links.js";
-import { MouseHandler } from "./renderer/mouse.js";
+import {
+	MouseEncoding,
+	MouseHandler,
+	MouseTrackingMode,
+} from "./renderer/mouse.js";
 import { applyTheme } from "./renderer/theme.js";
 import type {
 	BufferNamespace,
@@ -54,6 +58,14 @@ export class TerminalImpl implements Terminal {
 	private inputHandler: InputHandler | null = null;
 	private mouseHandler: MouseHandler | null = null;
 	private linkDetector: LinkDetector | null = null;
+
+	// DEC private mouse state — tracked at the terminal level so that DEC
+	// escapes (e.g. tmux's `\x1b[?1000h\x1b[?1006h` on session attach) are
+	// honoured even when they arrive before `open()` wires a MouseHandler.
+	// When `open()` runs, these are flushed onto the freshly-created
+	// handler. See `handleDecPrivateMode` for the protocol wire-up.
+	private pendingMouseTracking: MouseTrackingMode = MouseTrackingMode.Off;
+	private pendingMouseEncoding: MouseEncoding = MouseEncoding.Default;
 
 	constructor(options?: TerminalOptions) {
 		// Default options
@@ -261,6 +273,12 @@ export class TerminalImpl implements Terminal {
 		this.mouseHandler.onScroll((lines) => {
 			this.scrollLines(lines);
 		});
+		// Flush any DEC mouse state buffered from writes that arrived before
+		// `open()`. Without this, a tmux session that enables mouse on attach
+		// (writes its `?1000h?1006h` before the harness paints) would land
+		// in a freshly-constructed MouseHandler with `Off` defaults.
+		this.mouseHandler.setTrackingMode(this.pendingMouseTracking);
+		this.mouseHandler.setEncoding(this.pendingMouseEncoding);
 
 		// Create link detector
 		this.linkDetector = new LinkDetector(
@@ -695,10 +713,55 @@ export class TerminalImpl implements Terminal {
 					}
 					break;
 
+				case 1000: // VT200 mouse tracking — press + release
+					this.applyMouseTracking(MouseTrackingMode.VT200, set);
+					break;
+
+				case 1002: // Cell-motion mouse tracking — press + release + drag
+					this.applyMouseTracking(MouseTrackingMode.CellMotion, set);
+					break;
+
+				case 1003: // All-motion mouse tracking — press + release + every motion
+					this.applyMouseTracking(MouseTrackingMode.AllMotion, set);
+					break;
+
+				case 1006: // SGR 1006 encoding — orthogonal to tracking mode
+					this.applyMouseEncoding(
+						set ? MouseEncoding.SGR : MouseEncoding.Default,
+					);
+					break;
+
 				// Other DEC private modes - ignore for now
 				default:
 					break;
 			}
 		}
+	}
+
+	/**
+	 * Apply a DEC mouse tracking mode change (1000 / 1002 / 1003).
+	 *
+	 * Tracking modes are mutually exclusive: setting any of them replaces
+	 * the previously-active tracking mode. Resetting (`?...l`) clears
+	 * tracking only when the currently-active mode matches the one being
+	 * reset — this matches xterm's behaviour (tmux disables modes in the
+	 * same order it enabled them, so a stray `?1000l` after `?1002h` must
+	 * not clobber the 1002 state).
+	 */
+	private applyMouseTracking(mode: MouseTrackingMode, set: boolean): void {
+		if (set) {
+			this.pendingMouseTracking = mode;
+		} else if (this.pendingMouseTracking === mode) {
+			this.pendingMouseTracking = MouseTrackingMode.Off;
+		} else {
+			return;
+		}
+		this.mouseHandler?.setTrackingMode(this.pendingMouseTracking);
+	}
+
+	/** Apply a DEC mouse encoding change (1006 is orthogonal to tracking). */
+	private applyMouseEncoding(encoding: MouseEncoding): void {
+		this.pendingMouseEncoding = encoding;
+		this.mouseHandler?.setEncoding(encoding);
 	}
 }
