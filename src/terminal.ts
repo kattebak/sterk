@@ -22,7 +22,8 @@ import {
 	MouseHandler,
 	MouseTrackingMode,
 } from "./renderer/mouse.js";
-import { applyTheme } from "./renderer/theme.js";
+import { applyTheme, clearTruecolorCache } from "./renderer/theme.js";
+import { builtinThemeToTheme, getBuiltinTheme } from "./themes/index.js";
 import type {
 	BufferNamespace,
 	Disposable,
@@ -318,6 +319,34 @@ export class TerminalImpl implements Terminal {
 			return this.aceRenderer.getViewportCellCount();
 		}
 		return null;
+	}
+
+	/**
+	 * Swap to a built-in theme by id at runtime.
+	 *
+	 * The look-up resolves against the `THEMES` registry in
+	 * `src/themes/index.ts`; an unknown id throws (cheap typo catch). The
+	 * resolved palette is projected to the xterm-style `Theme` shape via
+	 * `builtinThemeToTheme()`, then re-applied through the same
+	 * `applyTheme()` pipeline used at construct time — so a runtime swap
+	 * and a fresh-construct swap go through identical CSS-generation code.
+	 *
+	 * After re-injecting the stylesheet we clear the truecolor cache (so
+	 * the contrast fallback re-derives against the new bg) and ask the
+	 * renderer to re-paint via `scheduleUpdate()`. We never reach into
+	 * Ace's `renderer.updateFull()` directly: a forced full-paint mid-write
+	 * burst can produce zombie rows (mobux PR #79 lesson). `scheduleUpdate()`
+	 * coalesces with any in-flight write into the next rAF.
+	 */
+	setTheme(themeId: string): void {
+		const builtin = getBuiltinTheme(themeId);
+		const theme = builtinThemeToTheme(builtin);
+		this._options.theme = theme;
+		applyTheme(theme);
+		clearTruecolorCache();
+		if (this.aceRenderer) {
+			this.aceRenderer.scheduleUpdate();
+		}
 	}
 
 	dispose(): void {

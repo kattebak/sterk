@@ -177,6 +177,23 @@ export interface Terminal {
 	getViewportCellCount?(): { cols: number; rows: number } | null;
 
 	/**
+	 * Swap to a built-in theme by id at runtime, without re-instantiating
+	 * the Terminal.
+	 *
+	 * Looks up the theme in the built-in `THEMES` registry (see
+	 * `src/themes/index.ts`) and re-applies it: the per-instance
+	 * `#sterk-theme` stylesheet is regenerated against the new palette
+	 * (CSS custom properties + 256-color fg/bg rules + contrast rules)
+	 * and the renderer is asked to re-paint via the race-safe `refresh()`
+	 * path — never reaches into Ace's internal `renderer.updateFull()`.
+	 *
+	 * @param themeId - The kebab-case id of a built-in theme
+	 *   (e.g. `"solarized-dark"`).
+	 * @throws Error if `themeId` is not a known built-in theme.
+	 */
+	setTheme?(themeId: string): void;
+
+	/**
 	 * Clean up resources and detach event listeners.
 	 * The Terminal instance should not be used after calling dispose().
 	 */
@@ -606,6 +623,81 @@ export interface Theme {
 	 * ANSI bright white (color 15). Alias for palette[15].
 	 */
 	brightWhite?: string;
+}
+
+/**
+ * A complete, named, built-in color theme.
+ *
+ * Distinct from `Theme` (the consumer-supplied xterm-style options bag):
+ * `BuiltinTheme` is a fully-specified value object that sterk ships with
+ * an `id` (kebab-case, used for `Terminal.setTheme(id)`), a human-readable
+ * `name`, and the entire 16-color ANSI palette plus default fg/bg/cursor/
+ * selection colors. Built-in themes are registered in `THEMES` (see
+ * `src/themes/index.ts`) and can be selected by id at runtime.
+ *
+ * For round-trip compatibility with the xterm-style `Theme` consumers
+ * already pass to `createTerminal({ theme })`, a `BuiltinTheme` can be
+ * projected to a `Theme` via `builtinThemeToTheme()` (see `src/themes/index.ts`).
+ */
+export interface BuiltinTheme {
+	/**
+	 * Machine-readable id (kebab-case). Used for `Terminal.setTheme(id)`.
+	 */
+	id: string;
+
+	/**
+	 * Human-readable display name (e.g. "Solarized Dark").
+	 */
+	name: string;
+
+	/**
+	 * The 16-color ANSI palette. Index 0-7 are the standard ANSI colors,
+	 * 8-15 are bright variants. Each entry is a CSS hex color string.
+	 */
+	ansi: readonly [
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+	];
+
+	/**
+	 * Default foreground (text) color.
+	 */
+	defaultFg: string;
+
+	/**
+	 * Default background color.
+	 */
+	defaultBg: string;
+
+	/**
+	 * Cursor color.
+	 */
+	cursor: string;
+
+	/**
+	 * Selection background color (CSS color — usually with alpha).
+	 */
+	selectionBg: string;
+
+	/**
+	 * Optional selection foreground override. Most themes leave the text
+	 * legible by default and omit this.
+	 */
+	selectionFg?: string;
 }
 
 // ── Disposable Pattern ───────────────────────────────────────────────

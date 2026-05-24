@@ -81,13 +81,19 @@ function clear() {
 	return nextFrame();
 }
 
-function setTheme(themeOrName) {
-	const theme =
-		typeof themeOrName === "string"
-			? { ...DEFAULT_THEME, name: themeOrName }
-			: themeOrName;
-	term.options.theme = theme;
-	return nextFrame();
+async function setTheme(themeOrId) {
+	// B10/B11: string ids resolve through the built-in registry via the
+	// `Terminal.setTheme(id)` API. An object payload is treated as a raw
+	// theme override (legacy path used by harness consumers).
+	if (typeof themeOrId === "string") {
+		term.setTheme(themeOrId);
+	} else {
+		term.options.theme = themeOrId;
+	}
+	if (typeof term.refresh === "function") {
+		await term.refresh();
+	}
+	await nextFrame();
 }
 
 function dumpState() {
