@@ -45,3 +45,8 @@ dist
 # Misc
 .DS_Store
 .vscode-test
+
+# Playwright visual regression
+playwright-report/
+test-results/
+playwright/.cache/

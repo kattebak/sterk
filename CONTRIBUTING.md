@@ -61,6 +61,44 @@ BREAKING CHANGE: getLineUnsafe() has been removed. Use getLine() instead.
 - Golden tests are preferred for parser/renderer behavior
 - Run `npm test` to verify all tests pass
 
+### Visual regression (Playwright)
+
+Sterk's CI runs a Playwright visual-regression suite against real Chromium
+(Pixel 7 emulation) on every PR. The harness lives under `test/visual/`:
+
+- `test/visual/harness/index.html` — deterministic test surface that loads
+  sterk from `dist/` and exposes `window.__sterkTest` for driving the terminal
+  (`feedRaw`, `setSize`, `clear`, `setTheme`, `dumpState`, `reset`).
+- `test/visual/sentinel.spec.ts` — D1 smoke test proving the pipeline works.
+- `test/visual/sentinel.spec.ts-snapshots/` — committed baseline PNGs.
+
+#### Running locally
+
+```bash
+npm run build                       # dist/ must be current
+npx playwright install chromium     # one-time
+npm run test:visual                 # run the suite
+```
+
+#### Updating baselines
+
+Any PR that changes terminal rendering output must regenerate the affected
+baselines and commit them alongside the code change:
+
+```bash
+npm run test:visual:update
+git add test/visual/**/*.png
+git commit -m "test(visual): update baselines for <reason>"
+```
+
+#### Definition of Done
+
+Per [issue #21](https://github.com/kattebak/sterk/issues/21), every sterk PR
+must pass both `npm run check` (lint + typecheck + vitest) **and**
+`npm run test:visual` (Playwright real-Chromium visual regression). The CI
+job blocks merge on any visual diff above `maxDiffPixelRatio: 0.02` that is
+not accompanied by an explicit baseline update commit.
+
 ## Pull requests
 
 - Keep PRs focused — one feature or fix per PR

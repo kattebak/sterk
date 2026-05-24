@@ -110,6 +110,18 @@ of contract (e.g. reaching into `editor.renderer.updateFull()`), and recipes
 for common needs (forced redraws, container resize, OSC 133, custom input) —
 see [STERK_INTEGRATION.md](./STERK_INTEGRATION.md).
 
+## Visual regression
+
+Every PR that touches rendering must pass a Playwright visual-regression
+suite against real Chromium with Pixel 7 emulation. Baselines live under
+`test/visual/`. See [CONTRIBUTING.md](./CONTRIBUTING.md#visual-regression-playwright)
+for how to run locally, update baselines, and the CI Definition of Done.
+
+```bash
+npm run build && npm run test:visual           # run the suite
+npm run test:visual:update                     # regenerate baselines
+```
+
 ## Design principles
 
 - **Clean-room core.** The VT parser is written from public specs (Paul Williams' state machine, XTerm Control Sequences, ECMA-48). No code lifted from other emulators.
