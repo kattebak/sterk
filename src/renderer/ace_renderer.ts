@@ -244,8 +244,35 @@ export class AceRenderer {
 	 * already accounts for Ace's internal padding (we zero it but a
 	 * future change could re-introduce it) and any reserved scrollbar
 	 * gutter, so the consumer's `cols` matches what is rendered.
+	 *
+	 * Sync semantics: this method calls `editor.resize(true)` before
+	 * reading `$size` so the returned grid reflects the host container's
+	 * CURRENT content-box, not whatever Ace measured at the last paint.
+	 * Without this, a consumer that fires a synchronous `resize` event
+	 * after a layout change (flex sibling shown/hidden, visualViewport
+	 * shrink, etc.) would race the container `ResizeObserver` — the
+	 * observer schedules its `editor.resize()` for the next rAF, so a
+	 * synchronous `getViewportCellCount()` call right after the layout
+	 * change reads the STALE pre-change `$size` and over-reports rows
+	 * that no longer fit. The downstream effect is the bottom rows of
+	 * the terminal getting clipped under whatever appeared (input bar,
+	 * keyboard ribbon, status panel, etc.). Forcing the re-measurement
+	 * here is the single source of truth: any caller that asks "how
+	 * many cells fit RIGHT NOW" gets an answer consistent with the DOM
+	 * at the call instant.
 	 */
 	getViewportCellCount(): { cols: number; rows: number } | null {
+		// Force Ace to re-measure its cached `$size` against the host
+		// container's current bounding box BEFORE we read scrollerWidth /
+		// scrollerHeight (or even read cell metrics, since some Ace
+		// versions defer character measurement until the first resize).
+		// This makes the method self-consistent with the DOM at call
+		// time, independent of whether the ResizeObserver callback has
+		// run yet. The `true` argument bypasses Ace's "size unchanged"
+		// short-circuit; when nothing actually changed this is a no-op
+		// aside from a single measurement.
+		this.editor.resize(true);
+
 		// biome-ignore lint/suspicious/noExplicitAny: Ace's internal $size and $padding aren't in the public typings.
 		const r = this.editor.renderer as any;
 		const metrics = this.getCellMetrics();

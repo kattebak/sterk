@@ -11,7 +11,7 @@
 // zeroes the padding and hides the scrollbar; `getViewportCellCount`
 // is the single source of truth for "how many cells actually fit".
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTerminal } from "../../src/index.js";
 import type { Terminal } from "../../src/types.js";
 
@@ -94,5 +94,35 @@ describe("cell-width parity", () => {
 		term = createTerminal();
 		const grid = term.getViewportCellCount?.();
 		expect(grid).toBeNull();
+	});
+
+	it("getViewportCellCount forces a synchronous editor.resize before reading $size", () => {
+		// Regression for the "bottom rows clipped" bug observed in mobux
+		// on Pixel 7 when the input bar is shown: the consumer fires a
+		// synchronous resize event after the layout change, but Ace's
+		// ResizeObserver-driven re-measure only runs on the next rAF.
+		// If `getViewportCellCount()` reads `$size` without forcing a
+		// re-measure first, the cached pre-change height is returned —
+		// so the PTY is told it has more rows than actually fit, and
+		// the bottom rows render off-screen.
+		//
+		// The fix: `getViewportCellCount()` must call `editor.resize(true)`
+		// before reading `$size`, so the value reflects the DOM at call
+		// time independent of observer timing.
+		term = createTerminal();
+		term.open?.(container);
+
+		// biome-ignore lint/suspicious/noExplicitAny: poking Ace internals.
+		const editor = (term.renderer as any).getEditor();
+		const resizeSpy = vi.spyOn(editor, "resize");
+		resizeSpy.mockClear();
+
+		term.getViewportCellCount?.();
+
+		// At least one `resize(true)` invocation must have occurred during
+		// the cell-count read — that's the synchronous re-measure that
+		// keeps the API result consistent with the live DOM.
+		const truthyCalls = resizeSpy.mock.calls.filter((args) => args[0] === true);
+		expect(truthyCalls.length).toBeGreaterThan(0);
 	});
 });
