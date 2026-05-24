@@ -17,6 +17,7 @@ export type {
 	BufferCell,
 	BufferLine,
 	BufferNamespace,
+	BuiltinTheme,
 	Disposable,
 	OscHandler,
 	Parser,
@@ -24,6 +25,20 @@ export type {
 	TerminalOptions,
 	Theme,
 } from "./types.js";
+
+// ── B10/B11: Built-in themes ────────────────────────────────────────
+
+export {
+	builtinThemeToTheme,
+	DEFAULT_BUILTIN_THEME_ID,
+	GRUVBOX_DARK_SOFT,
+	getBuiltinTheme,
+	NORD,
+	SOLARIZED_DARK,
+	SOLARIZED_LIGHT,
+	THEMES,
+	TOMORROW_NIGHT,
+} from "./themes/index.js";
 
 // ── M1: Color Palette Utilities ─────────────────────────────────────
 

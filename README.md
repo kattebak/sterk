@@ -97,13 +97,63 @@ See `demo/` for a complete standalone example.
 ## Public API
 
 - `createTerminal(options?: TerminalOptions): Terminal` — Create a terminal instance
-- `Terminal` — Main terminal interface (write, resize, open, dispose, refresh)
+- `Terminal` — Main terminal interface (write, resize, open, dispose, refresh, setTheme)
 - `Terminal.refresh(): Promise<void>` — Race-safe forced repaint. Waits for any in-flight `write()` burst to flush into the Ace document, then triggers a full repaint. Use this for theme/font swaps or recovery from a render glitch instead of reaching into Ace internals (`renderer.updateFull()`), which can paint a half-synced document.
+- `Terminal.setTheme(themeId: string): void` — Swap to a built-in theme by id at runtime (see [Built-in themes](#built-in-themes)).
 - `Parser.registerOscHandler(id, handler)` — Register OSC sequence handlers
 - `Buffer` / `BufferLine` / `BufferCell` — Read-only buffer access with full SGR attributes
 - `Theme` — Color theme definition (foreground, background, ANSI palette)
+- `BuiltinTheme` — Value-object form used by the built-in registry
 
 See `src/types.ts` for full API documentation with JSDoc comments and examples.
+
+## Built-in themes
+
+Sterk ships 5 named themes out of the box. Pick one by id at runtime
+without re-instantiating the `Terminal`:
+
+| Id                  | Display name        | Source                                   |
+| ------------------- | ------------------- | ---------------------------------------- |
+| `solarized-dark`    | Solarized Dark      | Ethan Schoonover — https://ethanschoonover.com/solarized/ |
+| `solarized-light`   | Solarized Light     | Ethan Schoonover — https://ethanschoonover.com/solarized/ |
+| `tomorrow-night`    | Tomorrow Night      | Chris Kempson — https://github.com/chriskempson/tomorrow-theme |
+| `nord`              | Nord                | Arctic Ice Studio — https://www.nordtheme.com/docs/colors-and-palettes |
+| `gruvbox-dark-soft` | Gruvbox Dark Soft   | Pavel Pertsev (morhetz) — https://github.com/morhetz/gruvbox |
+
+```typescript
+import { createTerminal, THEMES, SOLARIZED_DARK } from '@kattebak/sterk';
+
+const term = createTerminal({ cols: 80, rows: 24 });
+term.open(document.getElementById('terminal'));
+
+// Swap themes at runtime by id — the public, registry-backed entry point.
+term.setTheme('nord');
+
+// Enumerate the registry for a picker UI:
+for (const t of Object.values(THEMES)) {
+  console.log(t.id, t.name);
+}
+
+// Themes are also exported as constants for direct reference.
+console.log(SOLARIZED_DARK.ansi[1]); // "#dc322f" — Solarized red
+```
+
+The runtime swap regenerates the per-instance `#sterk-theme` stylesheet
+and schedules a coalesced re-paint via `scheduleUpdate()` — it never
+reaches into Ace's internal `renderer.updateFull()`.
+
+When `createTerminal()` is called without an explicit `theme` option,
+sterk keeps the historical neutral built-in palette (dark grey bg, light
+grey fg, XTerm-default ANSI palette). The 5 named themes above are
+opt-in via either `setTheme(id)` or `{ theme: builtinThemeToTheme(...) }`.
+For new integrations we recommend Solarized Dark as a safe, neutral
+default:
+
+```typescript
+import { createTerminal, SOLARIZED_DARK, builtinThemeToTheme } from '@kattebak/sterk';
+
+const term = createTerminal({ theme: builtinThemeToTheme(SOLARIZED_DARK) });
+```
 
 For the consumer ↔ sterk boundary — what's in contract, what's explicitly out
 of contract (e.g. reaching into `editor.renderer.updateFull()`), and recipes

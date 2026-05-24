@@ -205,6 +205,21 @@ export function applyTheme(theme: Theme): void {
 const truecolorCache = new Set<string>();
 
 /**
+ * Reset the truecolor CSS cache and tear down the injected stylesheet.
+ *
+ * Used by `setTheme()` so that a runtime swap doesn't leave behind
+ * truecolor rules computed against the previous palette's contrast
+ * fallback. The renderer re-injects truecolor rules lazily on the next
+ * `scheduleUpdate()` flush as cells are scanned.
+ */
+export function clearTruecolorCache(): void {
+	truecolorCache.clear();
+	if (typeof document === "undefined") return;
+	const existing = document.getElementById("sterk-truecolor");
+	if (existing) existing.remove();
+}
+
+/**
  * Inject CSS for a truecolor RGB value (24-bit)
  *
  * @param rgb - RGB value (0xRRGGBB)

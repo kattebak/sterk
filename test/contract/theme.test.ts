@@ -24,6 +24,14 @@
 import { describe, expect, it } from "vitest";
 import { createTerminal } from "../../src/index.js";
 import { applyTheme, generateAceThemeCss } from "../../src/renderer/theme.js";
+import {
+	GRUVBOX_DARK_SOFT,
+	NORD,
+	SOLARIZED_DARK,
+	SOLARIZED_LIGHT,
+	THEMES,
+	TOMORROW_NIGHT,
+} from "../../src/themes/index.js";
 
 describe("contract: theme", () => {
 	// ── Row 20 (+) — Runtime palette swap (per-instance CSS) ─────────
@@ -74,20 +82,43 @@ describe("contract: theme", () => {
 		"row 21 [M] default-fg-on-explicit-bg luminance fallback: writing `\\x1b[40m` (black bg) + default-fg picks a readable fg via luminance (aceterm contrastFg; sterk: missing — caused real mobux bug pre-PR #55)",
 	);
 
-	// ── Rows 40-44 (M) — Built-in themes ─────────────────────────────
-	it.todo(
-		"row 40 [M] built-in theme: Solarized Dark (Ethan Schoonover) shipped as `SOLARIZED_DARK` constant + DoD baseline target",
-	);
-	it.todo(
-		"row 41 [M] built-in theme: Solarized Light shipped as `SOLARIZED_LIGHT` constant + DoD baseline target",
-	);
-	it.todo(
-		"row 42 [M] built-in theme: Tomorrow Night (Chris Kempson) — preserves aceterm-via-mobux visual identity, shipped as `TOMORROW_NIGHT`",
-	);
-	it.todo(
-		"row 43 [M] built-in theme: Nord (Arctic Ice Studio) shipped as `NORD` — OLED-friendly muted palette",
-	);
-	it.todo(
-		"row 44 [M] built-in theme: Gruvbox Dark Soft (morhetz) shipped as `GRUVBOX_DARK_SOFT` — warm earth tones, non-blue alternative",
-	);
+	// ── Rows 40-44 (M) — Built-in themes (B10 + B11) ─────────────────
+	// One assertion per row: the constant exists, lives in THEMES under
+	// the documented id, and carries the expected palette anchor color
+	// from its canonical source (cited in each theme file's JSDoc).
+	it("row 40 [M] Solarized Dark shipped as `SOLARIZED_DARK` constant + registry entry", () => {
+		expect(SOLARIZED_DARK.id).toBe("solarized-dark");
+		expect(THEMES["solarized-dark"]).toBe(SOLARIZED_DARK);
+		// Canonical Solarized base03 (#002b36) — the Solarized dark bg.
+		expect(SOLARIZED_DARK.defaultBg).toBe("#002b36");
+		expect(SOLARIZED_DARK.ansi.length).toBe(16);
+	});
+
+	it("row 41 [M] Solarized Light shipped as `SOLARIZED_LIGHT` constant + registry entry", () => {
+		expect(SOLARIZED_LIGHT.id).toBe("solarized-light");
+		expect(THEMES["solarized-light"]).toBe(SOLARIZED_LIGHT);
+		// Canonical Solarized base3 (#fdf6e3) — the Solarized light bg.
+		expect(SOLARIZED_LIGHT.defaultBg).toBe("#fdf6e3");
+	});
+
+	it("row 42 [M] Tomorrow Night shipped as `TOMORROW_NIGHT` constant + registry entry", () => {
+		expect(TOMORROW_NIGHT.id).toBe("tomorrow-night");
+		expect(THEMES["tomorrow-night"]).toBe(TOMORROW_NIGHT);
+		// Chris Kempson's Tomorrow Night background.
+		expect(TOMORROW_NIGHT.defaultBg).toBe("#1d1f21");
+	});
+
+	it("row 43 [M] Nord shipped as `NORD` constant + registry entry", () => {
+		expect(NORD.id).toBe("nord");
+		expect(THEMES.nord).toBe(NORD);
+		// Polar Night nord0 — Nord background.
+		expect(NORD.defaultBg).toBe("#2e3440");
+	});
+
+	it("row 44 [M] Gruvbox Dark Soft shipped as `GRUVBOX_DARK_SOFT` constant + registry entry", () => {
+		expect(GRUVBOX_DARK_SOFT.id).toBe("gruvbox-dark-soft");
+		expect(THEMES["gruvbox-dark-soft"]).toBe(GRUVBOX_DARK_SOFT);
+		// Gruvbox bg0_s — soft-contrast dark background.
+		expect(GRUVBOX_DARK_SOFT.defaultBg).toBe("#32302f");
+	});
 });
