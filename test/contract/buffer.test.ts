@@ -57,7 +57,14 @@ describe("contract: buffer & scrollback", () => {
 	);
 
 	// ── Row 31 (M) — wcwidth (CJK / emoji / combining marks) ─────────
-	it.todo(
-		'row 31 [M] wcwidth: writing "🚀A" advances the cursor by 3 columns, not 2 (aceterm wc.js port; sterk treats every cell as 1 col)',
-	);
+	// Aceterm `wc.js` (Markus Kuhn) ported to TS in `src/util/wcwidth.ts`.
+	// Full coverage in `test/contract/unicode.test.ts` (this file keeps
+	// the canonical Row 31 banner check so the gap-matrix row stays
+	// honest in this file too).
+	it('row 31 [M] wcwidth: writing "🚀A" advances the cursor by 3 columns, not 2', () => {
+		const term = createTerminal({ cols: 10, rows: 2 });
+		term.write("🚀A");
+		expect(term.buffer.active.cursorX).toBe(3);
+		term.dispose();
+	});
 });

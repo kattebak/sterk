@@ -423,18 +423,23 @@ export class AceRenderer {
 	}
 
 	/**
-	 * Pre-inject CSS for all truecolor colors in the buffer
-	 * This ensures the CSS classes exist before Ace tokenizes
+	 * Pre-inject CSS for all truecolor colors in the buffer.
+	 *
+	 * Walks the cell grid (not the line-text character stream), since
+	 * wide-char placeholders contribute zero characters to the joined
+	 * line text but still hold an entry in the cells array (see
+	 * `scroll_buffer.ts` cell encoding for the wcwidth contract).
+	 * Iterating `cols` instead of `text.length` keeps the scan
+	 * deterministic across CJK / emoji content.
 	 */
 	private injectTruecolorStyles(): void {
 		const buffer = this.buffer;
+		const cols = buffer.cols;
 		for (let row = 0; row < buffer.length; row++) {
 			const line = buffer.getLine(row);
 			if (!line) continue;
 
-			// Scan all cells in the line
-			const text = line.translateToString(false);
-			for (let col = 0; col < text.length; col++) {
+			for (let col = 0; col < cols; col++) {
 				const cell = line.getCell(col);
 
 				// Check for truecolor foreground

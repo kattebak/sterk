@@ -372,10 +372,18 @@ export class TerminalImpl implements Terminal {
 	// ── Parser action handlers ───────────────────────────────────────
 
 	/**
-	 * Print a character to the buffer
+	 * Print a character to the buffer.
+	 *
+	 * The parser hands us one code point at a time (already UTF-8
+	 * decoded), so we route through `printCodePoint` which consults
+	 * `wcwidth` and lays out wide / combining / single-width cells
+	 * appropriately. ASCII fast-paths through the same call (width 1).
+	 *
+	 * Aceterm-parity reference: `libterm.js:475-491` did the same routing
+	 * via `wc.js`. See audit Row 33 / wcwidth module JSDoc.
 	 */
 	private handlePrint(char: string, code: number): void {
-		this.scrollBuffer.writeCell(char, code, this.vtParser.currentAttrs);
+		this.scrollBuffer.printCodePoint(char, code, this.vtParser.currentAttrs);
 	}
 
 	/**

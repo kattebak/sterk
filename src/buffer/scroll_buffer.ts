@@ -18,6 +18,7 @@ import type {
 	BufferLine,
 	BufferNamespace,
 } from "../types.js";
+import { wcwidth } from "../util/wcwidth.js";
 
 /**
  * SGR (Select Graphic Rendition) attributes for a cell.
@@ -62,14 +63,27 @@ export const DEFAULT_CELL_ATTRIBUTES: CellAttributes = {
 /**
  * Cell data structure.
  * Stores character content and SGR attributes.
+ *
+ * Wide-character placeholders (the trailing cell of a width-2 glyph)
+ * carry `chars: ""` and `isPlaceholder: true`. They contribute zero
+ * characters to `translateToString()` (so a line containing one CJK
+ * ideograph yields a 1-char string, not 2), but they still hold a slot
+ * in the cells array — so cursor X arithmetic stays in cell-units.
  */
 export interface Cell {
-	/** Character content (may be multi-char for wide glyphs) */
+	/** Character content (may be multi-char for wide/combining glyphs, empty for placeholders) */
 	chars: string;
 	/** Unicode code point of first character */
 	code: number;
 	/** SGR attributes */
 	attrs: CellAttributes;
+	/**
+	 * True if this cell is the trailing slot of a width-2 (wide) glyph.
+	 * Placeholder cells render no glyph but still occupy a column so the
+	 * cursor advances in cell-units. The leading wide cell's `chars`
+	 * carries the actual glyph; the placeholder's `chars` is `""`.
+	 */
+	isPlaceholder?: boolean;
 }
 
 /**
@@ -351,17 +365,103 @@ export class ScrollBuffer implements Buffer {
 	}
 
 	/**
-	 * Write a character at the cursor position with the given attributes.
+	 * Write a single-cell (width-1) character at the cursor position with
+	 * the given attributes. Used by the parser/terminal for ASCII writes
+	 * and by control sequences that need to drop a blank or sentinel cell
+	 * (e.g. erase-line emitting " "). Wide and combining code points must
+	 * go through `printCodePoint` so width is honoured.
 	 *
-	 * @param char - Character to write
+	 * @param char - Character to write (assumed single column)
 	 * @param code - Unicode code point
 	 * @param attrs - SGR attributes
 	 */
 	writeCell(char: string, code: number, attrs: CellAttributes): void {
-		const absoluteY = this._baseY + this._cursorY;
-		const relativeY = absoluteY - this._baseY;
+		this.placeCell(char, code, attrs, false);
+		this.advanceCursor(1);
+	}
 
-		// Ensure line exists
+	/**
+	 * Print a Unicode code point at the cursor, honouring its column
+	 * width as determined by `wcwidth()`. Routes:
+	 *
+	 *  - width 1 → single normal cell, cursor advances by 1
+	 *  - width 2 → leading cell holds the glyph, trailing cell is a
+	 *    `isPlaceholder: true` cell with `chars: ""` and `code: 0`;
+	 *    cursor advances by 2. If only one column remains on the line
+	 *    we wrap to the next line (xterm-style) so the glyph stays
+	 *    contiguous.
+	 *  - width 0 (combining mark) → append the code point's char to the
+	 *    *previous* cell's `chars` buffer without advancing the cursor.
+	 *    If there is no previous cell on this line (cursor at column 0
+	 *    or previous cell is a placeholder), Kuhn's spec says to drop
+	 *    the combining mark; we follow that.
+	 *  - width -1 (unprintable) → no-op.
+	 *
+	 * This is the parity counterpart to aceterm's `libterm.js:475-491`
+	 * wide-char + combining-mark write path (mobux audit Row 33).
+	 *
+	 * @param ch - The character (1-2 UTF-16 code units representing one code point)
+	 * @param cp - Unicode code point (matches `ch.codePointAt(0)`)
+	 * @param attrs - SGR attributes to bake onto the leading cell
+	 */
+	printCodePoint(ch: string, cp: number, attrs: CellAttributes): void {
+		const w = wcwidth(cp);
+
+		if (w < 0) {
+			// Unprintable — drop. (C0/C1 controls are already filtered by
+			// the parser, but a defensive guard keeps callers honest.)
+			return;
+		}
+
+		if (w === 0) {
+			// Combining mark: glue onto the previous cell's character buffer
+			// without advancing the cursor. If there's no anchor cell, the
+			// mark is dropped (Kuhn's behaviour — better than rendering an
+			// orphaned diacritic on its own).
+			this.appendCombiningMark(ch);
+			return;
+		}
+
+		if (w === 2) {
+			// Wide glyph: if only one column remains, wrap to the next row
+			// so the glyph is never split across a line boundary. xterm,
+			// foot, and iTerm all do this.
+			if (this._cursorX >= this.cols - 1) {
+				// Implicit wrap: push to start of next line.
+				this._cursorX = 0;
+				if (this._cursorY < this.rows - 1) {
+					this._cursorY++;
+				}
+				// (If we're already on the last row, the caller's newline
+				// machinery will handle scrolling; we just write at col 0.)
+			}
+			this.placeCell(ch, cp, attrs, false);
+			this.advanceCursor(1);
+			// Trailing placeholder slot.
+			this.placeCell("", 0, attrs, true);
+			this.advanceCursor(1);
+			return;
+		}
+
+		// Default: width-1 cell.
+		this.placeCell(ch, cp, attrs, false);
+		this.advanceCursor(1);
+	}
+
+	/**
+	 * Write the character `ch` into the cell at the current cursor
+	 * position. Does **not** advance the cursor; the caller is
+	 * responsible for advancing in cell-units. Used by both `writeCell`
+	 * (normal path) and `printCodePoint` (wide-char path).
+	 */
+	private placeCell(
+		ch: string,
+		code: number,
+		attrs: CellAttributes,
+		isPlaceholder: boolean,
+	): void {
+		const relativeY = this._cursorY;
+
 		while (this.lines.length <= relativeY) {
 			this.lines.push(createBlankLine(this.cols));
 		}
@@ -369,25 +469,67 @@ export class ScrollBuffer implements Buffer {
 		const line = this.lines[relativeY];
 		if (!line) return;
 
-		// Ensure cells array is long enough
 		while (line.cells.length <= this._cursorX) {
 			line.cells.push(createBlankCell());
 		}
 
-		// Write the cell
 		const cell = line.cells[this._cursorX];
-		if (cell) {
-			cell.chars = char;
-			cell.code = code;
-			cell.attrs = { ...attrs };
-		}
+		if (!cell) return;
 
-		// Advance cursor
-		this._cursorX++;
-		if (this._cursorX >= this.cols) {
-			this._cursorX = 0;
-			this._cursorY = Math.min(this._cursorY + 1, this.rows - 1);
+		cell.chars = ch;
+		cell.code = code;
+		cell.attrs = { ...attrs };
+		if (isPlaceholder) {
+			cell.isPlaceholder = true;
+		} else {
+			// Important: clear any stale placeholder flag from a previous
+			// occupant of this slot. Otherwise overwriting a width-2 trail
+			// with a fresh width-1 glyph would leave the placeholder bit
+			// set and confuse the renderer.
+			cell.isPlaceholder = false;
 		}
+	}
+
+	/**
+	 * Advance the cursor by `n` cell-units, wrapping at column edge to
+	 * the next row (with viewport clamping). Shared by all write paths
+	 * so wide-char and ASCII cursor math go through one place.
+	 */
+	private advanceCursor(n: number): void {
+		for (let i = 0; i < n; i++) {
+			this._cursorX++;
+			if (this._cursorX >= this.cols) {
+				this._cursorX = 0;
+				this._cursorY = Math.min(this._cursorY + 1, this.rows - 1);
+			}
+		}
+	}
+
+	/**
+	 * Append a zero-width combining mark to the previous cell on the
+	 * current row. If there is no anchor cell (cursor at column 0, or
+	 * previous cell is a width-2 placeholder), the mark is dropped —
+	 * matching Kuhn's POSIX wcwidth contract.
+	 */
+	private appendCombiningMark(ch: string): void {
+		if (this._cursorX === 0) return;
+
+		const line = this.lines[this._cursorY];
+		if (!line) return;
+
+		// The anchor is the *previous* cell. If that cell is a placeholder
+		// (the trailing half of a width-2 glyph), step back one more so
+		// the combining mark glues onto the leading cell.
+		let anchorX = this._cursorX - 1;
+		let anchor = line.cells[anchorX];
+		if (anchor?.isPlaceholder && anchorX > 0) {
+			anchorX--;
+			anchor = line.cells[anchorX];
+		}
+		if (!anchor || anchor.isPlaceholder) return;
+
+		anchor.chars += ch;
+		// Cursor does *not* advance.
 	}
 
 	/**
