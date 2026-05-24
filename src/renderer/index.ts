@@ -11,7 +11,12 @@ export {
 	scanBufferForLinks,
 	scanLineForLinks,
 } from "./links.js";
-export { MouseHandler, MouseMode } from "./mouse.js";
+export {
+	MouseEncoding,
+	MouseHandler,
+	MouseMode,
+	MouseTrackingMode,
+} from "./mouse.js";
 export {
 	applyTheme,
 	DEFAULT_THEME,
