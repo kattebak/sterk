@@ -290,6 +290,18 @@ export class TerminalImpl implements Terminal {
 		return null;
 	}
 
+	/**
+	 * Compute the exact grid (cols × rows) that fits in the rendered
+	 * scroller area. See `AceRenderer.getViewportCellCount()` for why
+	 * this is preferable to `clientWidth / cellWidth` math.
+	 */
+	getViewportCellCount(): { cols: number; rows: number } | null {
+		if (this.aceRenderer) {
+			return this.aceRenderer.getViewportCellCount();
+		}
+		return null;
+	}
+
 	dispose(): void {
 		if (this.aceRenderer) {
 			this.aceRenderer.dispose();

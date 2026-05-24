@@ -161,6 +161,22 @@ export interface Terminal {
 	getCellMetrics?(): { width: number; height: number } | null;
 
 	/**
+	 * Compute the exact cell grid (cols × rows) that fits in the
+	 * currently rendered scroller area, accounting for any internal
+	 * padding the renderer applies.
+	 *
+	 * Prefer this over computing `cols = floor(container.clientWidth /
+	 * cellWidth)` yourself: the renderer knows its own padding and
+	 * scrollbar reservation, and this method is the single source of
+	 * truth. On Pixel 7 with a 412px viewport and 9px cell width, naive
+	 * math gives 45 cols, but only ~43 actually fit without clipping.
+	 *
+	 * Returns null until the editor has measured itself (i.e. before
+	 * `open()` and the first rAF flush).
+	 */
+	getViewportCellCount?(): { cols: number; rows: number } | null;
+
+	/**
 	 * Clean up resources and detach event listeners.
 	 * The Terminal instance should not be used after calling dispose().
 	 */
