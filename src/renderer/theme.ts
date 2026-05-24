@@ -6,7 +6,7 @@
  */
 
 import type { Theme } from "../types.js";
-import { buildPalette } from "../util/colors.js";
+import { buildPalette, contrastFg } from "../util/colors.js";
 
 /**
  * Default theme colors if not specified
@@ -96,6 +96,20 @@ export function generateAceThemeCss(theme: Theme = {}): string {
 		)
 		.join("\n");
 
+	// Luminance-contrast fallback for default fg over explicit palette bg.
+	// For each palette bg colour, emit a rule that overrides the colour
+	// to the contrast pick (black or white) WHEN the cell has the
+	// `sterk-fg-default` marker (i.e. no SGR fg + an explicit SGR bg).
+	// Selector specificity: `.ace_editor .sterk-bg-N.sterk-fg-default`
+	// beats the default colour rule `.ace_editor { color: var(--sterk-fg) }`
+	// — same root `.ace_editor` with one extra class chain.
+	const contrastPaletteRules = fullPalette
+		.map(
+			(color, index) =>
+				`.ace_editor .sterk-bg-${index}.sterk-fg-default { color: ${contrastFg(color)} !important; }`,
+		)
+		.join("\n");
+
 	return `
 .sterk {
   --sterk-fg: ${fg};
@@ -130,6 +144,9 @@ ${fgPaletteRules}
 
 /* SGR background palette colors (0-255) */
 ${bgPaletteRules}
+
+/* Luminance-contrast fallback: default fg on explicit palette bg (A3) */
+${contrastPaletteRules}
 
 /* SGR text attributes */
 .ace_editor .sterk-bold {
@@ -207,11 +224,18 @@ export function injectTruecolorCss(rgb: number, target: "fg" | "bg"): void {
 	// Convert RGB to CSS hex color
 	const color = `#${hex}`;
 
-	// Inject CSS rule
-	const css =
+	// Inject CSS rule. For bg classes we additionally emit the
+	// default-fg luminance-contrast fallback (A3): when a cell has no
+	// SGR fg and this RGB bg, force fg to the contrast pick. Matches
+	// the palette-bg path in `generateAceThemeCss`.
+	const baseCss =
 		target === "fg"
 			? `.ace_editor .${className} { color: ${color} !important; }`
 			: `.ace_editor .${className} { background-color: ${color} !important; }`;
+	const css =
+		target === "bg"
+			? `${baseCss}\n.ace_editor .${className}.sterk-fg-default { color: ${contrastFg(color)} !important; }`
+			: baseCss;
 
 	// Find or create truecolor style element
 	let styleEl = document.getElementById(

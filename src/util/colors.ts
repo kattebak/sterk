@@ -186,3 +186,62 @@ export function buildPalette(): string[] {
 	}
 	return palette;
 }
+
+/**
+ * Compute the relative luminance of an sRGB color per WCAG 2 / Rec. 709.
+ *
+ * Accepts CSS-style hex strings (`#rrggbb` or `rrggbb`); returns a value in
+ * `[0, 1]` where `0` is pure black and `1` is pure white.
+ *
+ * Reference: https://www.w3.org/TR/WCAG20-TECHS/G18.html
+ *
+ * @param hex - CSS hex color string (e.g. `"#1e1e1e"`)
+ * @returns Relative luminance in `[0, 1]`
+ */
+export function relativeLuminance(hex: string): number {
+	const cleaned = hex.replace(/^#/, "");
+	if (cleaned.length < 6) return 0;
+
+	const parse = (i: number): number =>
+		Number.parseInt(cleaned.slice(i, i + 2), 16) / 255;
+
+	// Linearize each sRGB component (gamma-correct -> linear)
+	const lin = (c: number): number =>
+		c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+
+	const r = lin(parse(0));
+	const g = lin(parse(2));
+	const b = lin(parse(4));
+
+	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Threshold for picking a light vs dark default fg against an explicit bg.
+ *
+ * Tuned to match the original aceterm value (PR #55 era). A bg with
+ * `relativeLuminance >= LUMINANCE_THRESHOLD` is considered "light" — we
+ * render dark default fg over it; below that gets a light default fg.
+ *
+ * The textbook midpoint is `0.5`; aceterm shipped `0.4` so that the
+ * base16-tomorrow bright bgs (green/cyan at ~0.46-0.47) sit on the
+ * "dark fg" side rather than the "light fg" side, which matched human
+ * judgement on those palettes.
+ */
+export const LUMINANCE_THRESHOLD = 0.4;
+
+/**
+ * Pick a readable default foreground color for an explicit background.
+ *
+ * Returns `"#000000"` if the background's luminance is at or above the
+ * threshold (light bg → dark fg), otherwise `"#ffffff"` (dark bg →
+ * light fg). This is the sterk equivalent of aceterm's `contrastFg`
+ * helper and exists to prevent black-on-black / white-on-white renders
+ * when an explicit SGR bg is paired with the theme's default fg.
+ *
+ * @param hex - CSS hex color string of the explicit background
+ * @returns `"#000000"` or `"#ffffff"`
+ */
+export function contrastFg(hex: string): string {
+	return relativeLuminance(hex) >= LUMINANCE_THRESHOLD ? "#000000" : "#ffffff";
+}

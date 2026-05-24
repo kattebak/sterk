@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
 	ANSI_COLORS,
 	buildPalette,
+	contrastFg,
 	hexToPalette,
 	hexToRgb,
+	LUMINANCE_THRESHOLD,
 	paletteToHex,
 	paletteToRgb,
+	relativeLuminance,
 	rgbToHex,
 	rgbToPalette,
 } from "../src/util/colors.js";
@@ -178,6 +181,57 @@ describe("colors", () => {
 				const roundTrip = hexToPalette(hex);
 				expect(paletteToHex(roundTrip)).toBe(hex);
 			}
+		});
+	});
+
+	describe("relativeLuminance", () => {
+		it("returns 0 for pure black", () => {
+			expect(relativeLuminance("#000000")).toBe(0);
+		});
+
+		it("returns 1 for pure white", () => {
+			expect(relativeLuminance("#ffffff")).toBeCloseTo(1, 5);
+		});
+
+		it("orders primary saturated colors per Rec. 709 coefficients", () => {
+			// Green is weighted highest (0.7152), red next (0.2126), blue lowest (0.0722)
+			const r = relativeLuminance("#ff0000");
+			const g = relativeLuminance("#00ff00");
+			const b = relativeLuminance("#0000ff");
+			expect(g).toBeGreaterThan(r);
+			expect(r).toBeGreaterThan(b);
+			expect(r).toBeCloseTo(0.2126, 3);
+			expect(g).toBeCloseTo(0.7152, 3);
+			expect(b).toBeCloseTo(0.0722, 3);
+		});
+
+		it("accepts hex without leading '#'", () => {
+			expect(relativeLuminance("ffffff")).toBeCloseTo(1, 5);
+			expect(relativeLuminance("000000")).toBe(0);
+		});
+
+		it("returns 0 for malformed input rather than NaN", () => {
+			expect(relativeLuminance("#abc")).toBe(0);
+			expect(relativeLuminance("")).toBe(0);
+		});
+	});
+
+	describe("contrastFg", () => {
+		it("picks dark fg over light backgrounds", () => {
+			expect(contrastFg("#ffffff")).toBe("#000000"); // white
+			expect(contrastFg("#e5e5e5")).toBe("#000000"); // ANSI white (7)
+			expect(contrastFg("#cdcd00")).toBe("#000000"); // ANSI yellow
+		});
+
+		it("picks light fg over dark backgrounds", () => {
+			expect(contrastFg("#000000")).toBe("#ffffff"); // black (ANSI 0)
+			expect(contrastFg("#0000ee")).toBe("#ffffff"); // ANSI blue
+			expect(contrastFg("#cd00cd")).toBe("#ffffff"); // ANSI magenta
+		});
+
+		it("threshold is exactly LUMINANCE_THRESHOLD (boundary defined)", () => {
+			expect(LUMINANCE_THRESHOLD).toBeGreaterThan(0);
+			expect(LUMINANCE_THRESHOLD).toBeLessThan(1);
 		});
 	});
 

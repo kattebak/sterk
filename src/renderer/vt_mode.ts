@@ -144,6 +144,23 @@ function buildCellClassName(cell: import("../types.js").BufferCell): string {
 		classes.push(`sterk-bg-rgb-${bgColor.toString(16).padStart(6, "0")}`);
 	}
 
+	// Luminance-contrast fallback for the default fg over an explicit bg
+	// (sterk parity item A3, referencing aceterm's `Aceterm.contrastFg`).
+	//
+	// When a cell has no SGR-assigned fg (fgMode === 0) but does have an
+	// SGR-assigned bg (bgMode !== 0), the theme's default fg colour may
+	// not be readable on that bg — e.g. theme fg `#000` over `\x1b[40m`
+	// (black bg) renders black-on-black. Tagging the cell with
+	// `sterk-fg-default` lets the theme's contrast-fallback CSS rules
+	// override the colour when paired with an explicit bg class. The
+	// bg-painting CSS rule wins on specificity for `background-color`
+	// because it is unique; the contrast rule wins on `color` because it
+	// is `.sterk-bg-N.sterk-fg-default { color: ... }` (two-class
+	// selector beats the single-class default `.ace_editor { color: ... }`).
+	if (fgMode === 0 && bgMode !== 0) {
+		classes.push("sterk-fg-default");
+	}
+
 	// Text attributes
 	if (cell.isBold()) {
 		classes.push("sterk-bold");

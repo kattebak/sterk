@@ -114,5 +114,54 @@ describe("theme", () => {
 			expect(css).toContain(DEFAULT_THEME.foreground);
 			expect(css).toContain(DEFAULT_THEME.background);
 		});
+
+		// ── A3: luminance contrast fallback ─────────────────────────────
+		// (kattebak/sterk#21 row 21, mvhenten/mobux PR #55)
+		describe("default-fg-on-explicit-bg luminance contrast (A3)", () => {
+			it("emits a contrast rule for every palette bg index", () => {
+				const css = generateAceThemeCss();
+				// Palette covers 0-255 (see buildPalette()). One contrast
+				// rule per index keeps the generated CSS deterministic.
+				for (let i = 0; i < 256; i++) {
+					expect(css).toContain(`.sterk-bg-${i}.sterk-fg-default`);
+				}
+			});
+
+			it("dark palette bgs map to white default fg", () => {
+				const css = generateAceThemeCss();
+				// Palette index 0 = ANSI black (#000000) -> light fg.
+				expect(css).toContain(
+					".ace_editor .sterk-bg-0.sterk-fg-default { color: #ffffff !important; }",
+				);
+				// Palette index 4 = ANSI blue (#0000ee) -> light fg.
+				expect(css).toContain(
+					".ace_editor .sterk-bg-4.sterk-fg-default { color: #ffffff !important; }",
+				);
+			});
+
+			it("light palette bgs map to black default fg", () => {
+				const css = generateAceThemeCss();
+				// Palette index 7 = ANSI white (#e5e5e5) -> dark fg.
+				expect(css).toContain(
+					".ace_editor .sterk-bg-7.sterk-fg-default { color: #000000 !important; }",
+				);
+				// Palette index 15 = ANSI bright white (#ffffff) -> dark fg.
+				expect(css).toContain(
+					".ace_editor .sterk-bg-15.sterk-fg-default { color: #000000 !important; }",
+				);
+			});
+
+			it("contrast rules track theme palette overrides", () => {
+				// Swap palette index 0 (normally black) for a near-white
+				// colour. The contrast rule for index 0 must flip to dark
+				// fg because the painted bg is now light.
+				const css = generateAceThemeCss({
+					palette: ["#f0f0f0"], // override only palette[0]
+				});
+				expect(css).toContain(
+					".ace_editor .sterk-bg-0.sterk-fg-default { color: #000000 !important; }",
+				);
+			});
+		});
 	});
 });
