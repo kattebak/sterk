@@ -67,6 +67,7 @@ export class AceRenderer {
 		private container: HTMLElement,
 		private bufferNamespace: BufferNamespaceImpl,
 		fontSize: number,
+		fontFamily: string = "monospace",
 	) {
 		// Create wrapper with sterk class
 		this.wrapper = document.createElement("div");
@@ -85,7 +86,7 @@ export class AceRenderer {
 		// Configure editor
 		this.editor.setOptions({
 			fontSize,
-			fontFamily: "monospace",
+			fontFamily,
 			showPrintMargin: false,
 			showGutter: false,
 			highlightActiveLine: false,
@@ -317,6 +318,19 @@ export class AceRenderer {
 	 */
 	setFontSize(size: number): void {
 		this.editor.setFontSize(size);
+	}
+
+	/**
+	 * Set font family. Pass a fully-formed CSS `font-family` value (the
+	 * caller is responsible for the fallback chain, e.g.
+	 * `"'JetBrains Mono', monospace"`). Ace re-measures character width on
+	 * the next paint, so a follow-up `scheduleUpdate()` is enough to land
+	 * the new metrics — no explicit `editor.resize()` needed because
+	 * Ace's `setOption('fontFamily', ...)` triggers an internal
+	 * `$measureSizes` recompute.
+	 */
+	setFontFamily(family: string): void {
+		this.editor.setOption("fontFamily", family);
 	}
 
 	/**

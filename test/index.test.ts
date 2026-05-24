@@ -77,6 +77,7 @@ describe("@kattebak/sterk", () => {
 				scrollback?: number;
 				theme?: Theme;
 				fontFamily?: string;
+				font?: string;
 				fontSize?: number;
 				allowSelection?: boolean;
 			}>();

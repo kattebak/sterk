@@ -40,6 +40,16 @@ export {
 	TOMORROW_NIGHT,
 } from "./themes/index.js";
 
+// ── Built-in fonts ──────────────────────────────────────────────────
+
+export {
+	BUILTIN_FONTS,
+	type BuiltinFont,
+	DEFAULT_FONT_ID,
+	getBuiltinFont,
+	injectFontFace,
+} from "./fonts/index.js";
+
 // ── M1: Color Palette Utilities ─────────────────────────────────────
 
 export {
