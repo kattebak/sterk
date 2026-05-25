@@ -51,6 +51,16 @@ export class AceRenderer {
 	private updateResolve: (() => void) | null = null;
 	private disposed = false;
 	/**
+	 * Optional callback fired after a coalesced rAF flush commits a repaint,
+	 * receiving the affected viewport row range. Wired by the Terminal to
+	 * back `Terminal.onRender` (xterm.js parity). The range covers the live
+	 * viewport rows (`0 .. rows-1`); sterk re-syncs the whole visible screen
+	 * per flush, so a row-precise diff would be misleading.
+	 */
+	private onRenderCallback:
+		| ((range: { start: number; end: number }) => void)
+		| null = null;
+	/**
 	 * Per-row rendered-attribute signature from the LAST sync, indexed by row.
 	 *
 	 * `syncBufferToDocument()` only rewrites a document line when its TEXT
@@ -550,10 +560,51 @@ export class AceRenderer {
 			this.syncBufferToDocument();
 			this.updateCursor();
 			this.updateScroll();
+			this.emitRender();
 			resolve?.();
 		});
 
 		return promise;
+	}
+
+	/**
+	 * Register the onRender callback (backs `Terminal.onRender`). Fired after
+	 * each committed rAF flush with the repainted viewport row range.
+	 */
+	onRender(callback: (range: { start: number; end: number }) => void): void {
+		this.onRenderCallback = callback;
+	}
+
+	/**
+	 * Notify the onRender subscriber of a committed repaint. Sterk re-syncs
+	 * the whole visible screen per flush, so the reported range spans the
+	 * live viewport rows (`0 .. visibleRows-1`).
+	 */
+	private emitRender(): void {
+		if (!this.onRenderCallback) return;
+		// Derive the visible row count from Ace's ALREADY-measured cache —
+		// never force a resize here (that would inflate resize-observer
+		// coalescing counts and run on every flush). Fall back to the buffer
+		// length when no measurement exists yet (pre-first-paint).
+		const end = Math.max(0, this.visibleRowCount() - 1);
+		this.onRenderCallback({ start: 0, end });
+	}
+
+	/**
+	 * Best-effort visible row count from Ace's cached layout (no re-measure).
+	 * Used by {@link emitRender}; falls back to the buffer length before the
+	 * first paint has measured the scroller.
+	 */
+	private visibleRowCount(): number {
+		// biome-ignore lint/suspicious/noExplicitAny: Ace's $size / lineHeight aren't in the public typings.
+		const r = this.editor.renderer as any;
+		const lineHeight = typeof r.lineHeight === "number" ? r.lineHeight : 0;
+		const scrollerHeight =
+			typeof r.$size?.scrollerHeight === "number" ? r.$size.scrollerHeight : 0;
+		if (lineHeight > 0 && scrollerHeight > 0) {
+			return Math.max(1, Math.floor(scrollerHeight / lineHeight));
+		}
+		return this.buffer.length;
 	}
 
 	/**
@@ -844,6 +895,7 @@ export class AceRenderer {
 		const pending = this.updateResolve;
 		this.updateResolve = null;
 		this.updatePromise = null;
+		this.onRenderCallback = null;
 		pending?.();
 
 		this.editor.destroy();

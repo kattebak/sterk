@@ -73,6 +73,14 @@ export class TerminalImpl implements Terminal {
 	private pendingMouseTracking: MouseTrackingMode = MouseTrackingMode.Off;
 	private pendingMouseEncoding: MouseEncoding = MouseEncoding.Default;
 
+	// Custom key/wheel handlers can be attached before `open()` wires the
+	// input/mouse handlers (xterm.js allows this). Buffer them here and flush
+	// onto the freshly-created handlers in `open()`, mirroring the pending
+	// mouse-state pattern above.
+	private pendingCustomKeyHandler: ((e: KeyboardEvent) => boolean) | null =
+		null;
+	private pendingCustomWheelHandler: ((e: WheelEvent) => boolean) | null = null;
+
 	constructor(options?: TerminalOptions) {
 		// Resolve the font option. The contract: bare `createTerminal()` must
 		// render with a bundled font (JetBrains Mono) so consumers don't have
@@ -113,6 +121,11 @@ export class TerminalImpl implements Terminal {
 			font: fontId ?? "",
 			fontSize: options?.fontSize ?? 13,
 			allowSelection: options?.allowSelection ?? true,
+			convertEol: options?.convertEol ?? false,
+			disableStdin: options?.disableStdin ?? false,
+			cursorBlink: options?.cursorBlink ?? false,
+			cursorStyle: options?.cursorStyle ?? "block",
+			cursorInactiveStyle: options?.cursorInactiveStyle ?? "outline",
 		};
 
 		// Create buffer
@@ -190,7 +203,19 @@ export class TerminalImpl implements Terminal {
 		const beforeCursorY = this.scrollBuffer.cursorY;
 		const beforeViewportY = this.scrollBuffer.viewportY;
 
-		this.vtParser.write(data);
+		// convertEol: treat a bare `\n` (LF) as `\r\n` (CRLF) so Unix-style
+		// line endings land at the start of the next row instead of stair-
+		// stepping. We only rewrite LFs that aren't already preceded by a CR,
+		// so existing CRLFs are untouched. Decode bytes to a string first so
+		// the rewrite is uniform across both input shapes.
+		let payload: string | Uint8Array = data;
+		if (this._options.convertEol) {
+			const str =
+				typeof data === "string" ? data : new TextDecoder().decode(data);
+			payload = str.replace(/(?<!\r)\n/g, "\r\n");
+		}
+
+		this.vtParser.write(payload);
 		if (this.aceRenderer) {
 			this.aceRenderer.scheduleUpdate();
 		}
@@ -458,6 +483,69 @@ export class TerminalImpl implements Terminal {
 		};
 	}
 
+	onKey(
+		callback: (ev: { key: string; domEvent: KeyboardEvent }) => void,
+	): Disposable {
+		const wrapper = (ev: unknown) => {
+			callback(ev as { key: string; domEvent: KeyboardEvent });
+		};
+		this.emitter.on("key", wrapper);
+		return {
+			dispose: () => {
+				this.emitter.off("key", wrapper);
+			},
+		};
+	}
+
+	onBinary(callback: (data: string) => void): Disposable {
+		const wrapper = (data: unknown) => {
+			if (typeof data === "string") {
+				callback(data);
+			}
+		};
+		this.emitter.on("binary", wrapper);
+		return {
+			dispose: () => {
+				this.emitter.off("binary", wrapper);
+			},
+		};
+	}
+
+	onRender(
+		callback: (range: { start: number; end: number }) => void,
+	): Disposable {
+		const wrapper = (range: unknown) => {
+			callback(range as { start: number; end: number });
+		};
+		this.emitter.on("render", wrapper);
+		return {
+			dispose: () => {
+				this.emitter.off("render", wrapper);
+			},
+		};
+	}
+
+	/**
+	 * Attach a custom key event handler (xterm.js parity). Returning `false`
+	 * from the handler suppresses all terminal processing of that key event.
+	 * If `open()` hasn't wired the input handler yet, the handler is buffered
+	 * and flushed when `open()` runs.
+	 */
+	attachCustomKeyEventHandler(handler: (e: KeyboardEvent) => boolean): void {
+		this.pendingCustomKeyHandler = handler;
+		this.inputHandler?.attachCustomKeyEventHandler(handler);
+	}
+
+	/**
+	 * Attach a custom wheel event handler (xterm.js parity). Returning `false`
+	 * from the handler suppresses all terminal processing of that wheel event.
+	 * Buffered and flushed in `open()` if the mouse handler isn't wired yet.
+	 */
+	attachCustomWheelEventHandler(handler: (e: WheelEvent) => boolean): void {
+		this.pendingCustomWheelHandler = handler;
+		this.mouseHandler?.attachCustomWheelEventHandler(handler);
+	}
+
 	send(data: string | Uint8Array): void {
 		const str =
 			typeof data === "string" ? data : new TextDecoder().decode(data);
@@ -477,6 +565,11 @@ export class TerminalImpl implements Terminal {
 			this._options.fontFamily,
 		);
 
+		// Surface renderer repaints as onRender (xterm.js parity).
+		this.aceRenderer.onRender((range) => {
+			this.emitter.emit("render", range);
+		});
+
 		// Apply theme
 		applyTheme(this._options.theme);
 
@@ -486,6 +579,17 @@ export class TerminalImpl implements Terminal {
 		this.inputHandler.onData((data) => {
 			this.emitter.emit("data", data);
 		});
+		this.inputHandler.onKey((ev) => {
+			this.emitter.emit("key", ev);
+		});
+		// disableStdin suppresses user input → onData/onKey at the input layer.
+		this.inputHandler.setDisableStdin(this._options.disableStdin);
+		// Flush any custom key handler attached before open().
+		if (this.pendingCustomKeyHandler) {
+			this.inputHandler.attachCustomKeyEventHandler(
+				this.pendingCustomKeyHandler,
+			);
+		}
 
 		// Create mouse handler
 		this.mouseHandler = new MouseHandler(editorElement, () =>
@@ -494,9 +598,20 @@ export class TerminalImpl implements Terminal {
 		this.mouseHandler.onData((data) => {
 			this.emitter.emit("data", data);
 		});
+		// Mouse reports are the binary subset of host-bound input; the handler
+		// fires this alongside onData at the same point (see Terminal.onBinary).
+		this.mouseHandler.onBinary((data) => {
+			this.emitter.emit("binary", data);
+		});
 		this.mouseHandler.onScroll((lines) => {
 			this.scrollLines(lines);
 		});
+		// Flush any custom wheel handler attached before open().
+		if (this.pendingCustomWheelHandler) {
+			this.mouseHandler.attachCustomWheelEventHandler(
+				this.pendingCustomWheelHandler,
+			);
+		}
 		// Flush any DEC mouse state buffered from writes that arrived before
 		// `open()`. Without this, a tmux session that enables mouse on attach
 		// (writes its `?1000h?1006h` before the harness paints) would land

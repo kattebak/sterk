@@ -144,6 +144,11 @@ export function keyboardEventToSequence(event: KeyboardEvent): string | null {
  */
 export class InputHandler {
 	private onDataCallback: ((data: string) => void) | null = null;
+	private onKeyCallback:
+		| ((ev: { key: string; domEvent: KeyboardEvent }) => void)
+		| null = null;
+	private customKeyHandler: ((e: KeyboardEvent) => boolean) | null = null;
+	private disableStdin = false;
 	private compositionData = "";
 
 	constructor(private element: HTMLElement) {
@@ -177,13 +182,49 @@ export class InputHandler {
 	}
 
 	/**
+	 * Set the key callback (called alongside onData for each key input,
+	 * carrying both the translated VT sequence and the originating DOM event).
+	 */
+	onKey(
+		callback: (ev: { key: string; domEvent: KeyboardEvent }) => void,
+	): void {
+		this.onKeyCallback = callback;
+	}
+
+	/**
+	 * Attach a custom key event handler. Returning `false` suppresses all
+	 * terminal processing of the event (no VT translation, no onData/onKey).
+	 * Only one handler is active at a time; attaching replaces the previous.
+	 */
+	attachCustomKeyEventHandler(handler: (e: KeyboardEvent) => boolean): void {
+		this.customKeyHandler = handler;
+	}
+
+	/**
+	 * Toggle stdin suppression. When true, input events are still received
+	 * (and default browser behavior is still prevented for handled keys) but
+	 * no data is emitted to the host via onData/onKey.
+	 */
+	setDisableStdin(disabled: boolean): void {
+		this.disableStdin = disabled;
+	}
+
+	/**
 	 * Handle keydown events
 	 */
 	private handleKeyDown = (event: KeyboardEvent): void => {
+		// Custom handler veto (xterm semantics): a `false` return means the
+		// terminal must not process this event at all.
+		if (this.customKeyHandler && this.customKeyHandler(event) === false) {
+			return;
+		}
+
 		const sequence = keyboardEventToSequence(event);
-		if (sequence && this.onDataCallback) {
+		if (sequence) {
 			event.preventDefault();
-			this.onDataCallback(sequence);
+			if (this.disableStdin) return;
+			this.onKeyCallback?.({ key: sequence, domEvent: event });
+			this.onDataCallback?.(sequence);
 		}
 	};
 
@@ -214,7 +255,9 @@ export class InputHandler {
 	 */
 	private handleCompositionEnd = (event: CompositionEvent): void => {
 		const text = event.data || this.compositionData;
-		if (text && this.onDataCallback) {
+		// IME composition is user input — suppressed by disableStdin, same as
+		// keydown-derived sequences.
+		if (text && !this.disableStdin && this.onDataCallback) {
 			this.onDataCallback(text);
 		}
 		this.compositionData = "";
@@ -239,5 +282,7 @@ export class InputHandler {
 			this.handleCompositionEnd,
 		);
 		this.onDataCallback = null;
+		this.onKeyCallback = null;
+		this.customKeyHandler = null;
 	}
 }

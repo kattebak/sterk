@@ -144,6 +144,8 @@ export class MouseHandler {
 	private encoding: MouseEncoding = MouseEncoding.Default;
 	private onDataCallback: ((data: string) => void) | null = null;
 	private onScrollCallback: ((lines: number) => void) | null = null;
+	private onBinaryCallback: ((data: string) => void) | null = null;
+	private customWheelHandler: ((e: WheelEvent) => boolean) | null = null;
 	private lastButton: MouseButton | null = null;
 
 	constructor(
@@ -234,6 +236,34 @@ export class MouseHandler {
 	}
 
 	/**
+	 * Set the binary callback. Mouse-report sequences are the binary subset
+	 * of host-bound input; this fires alongside `onData` at the same point so
+	 * consumers can split the binary stream out (xterm.js `onBinary`).
+	 */
+	onBinary(callback: (data: string) => void): void {
+		this.onBinaryCallback = callback;
+	}
+
+	/**
+	 * Attach a custom wheel event handler. Returning `false` suppresses all
+	 * terminal processing of the event (no viewport scroll, no mouse-wheel
+	 * report). Only one handler is active at a time.
+	 */
+	attachCustomWheelEventHandler(handler: (e: WheelEvent) => boolean): void {
+		this.customWheelHandler = handler;
+	}
+
+	/**
+	 * Emit a host-bound mouse sequence. Mouse reports are binary input, so we
+	 * fire both `onData` (unified stream) and `onBinary` (binary subset) at
+	 * the same point — the boundary documented on `Terminal.onBinary`.
+	 */
+	private emitData(data: string): void {
+		this.onDataCallback?.(data);
+		this.onBinaryCallback?.(data);
+	}
+
+	/**
 	 * Emit a mouse sequence via the configured encoding.
 	 *
 	 * `pressed=false` produces a release event. In legacy X10 encoding,
@@ -248,14 +278,14 @@ export class MouseHandler {
 		modifiers: number,
 		pressed: boolean,
 	): void {
-		if (!this.onDataCallback) return;
+		if (!this.onDataCallback && !this.onBinaryCallback) return;
 		if (this.encoding === MouseEncoding.SGR) {
-			this.onDataCallback(
+			this.emitData(
 				generateSGR1006Sequence(button, col, row, modifiers, pressed),
 			);
 		} else {
 			const b = pressed ? button : MouseButton.Release;
-			this.onDataCallback(generateX10Sequence(b, col, row, modifiers));
+			this.emitData(generateX10Sequence(b, col, row, modifiers));
 		}
 	}
 
@@ -350,6 +380,14 @@ export class MouseHandler {
 	 * Handle wheel events
 	 */
 	private handleWheel = (event: WheelEvent): void => {
+		// Custom handler veto (xterm semantics): a `false` return means the
+		// terminal must not process this wheel event at all (no scroll, no
+		// mouse-wheel report). We return before preventDefault so the page's
+		// native scroll can still occur if the consumer wants it.
+		if (this.customWheelHandler && this.customWheelHandler(event) === false) {
+			return;
+		}
+
 		event.preventDefault();
 
 		// When mouse tracking is off, scroll the viewport
@@ -378,9 +416,7 @@ export class MouseHandler {
 				modifiers,
 				true,
 			);
-			if (this.onDataCallback) {
-				this.onDataCallback(sequence);
-			}
+			this.emitData(sequence);
 		}
 	};
 
@@ -438,5 +474,7 @@ export class MouseHandler {
 		this.element.removeEventListener("touchend", this.handleTouchEnd);
 		this.onDataCallback = null;
 		this.onScrollCallback = null;
+		this.onBinaryCallback = null;
+		this.customWheelHandler = null;
 	}
 }

@@ -241,6 +241,80 @@ export interface Terminal {
 	onCursorMove(callback: () => void): Disposable;
 
 	/**
+	 * Register a callback invoked for each key input event, alongside
+	 * {@link Terminal.onData}. The callback receives both the translated VT
+	 * `key` string and the originating `domEvent`. Mirrors xterm.js
+	 * `Terminal.onKey`.
+	 *
+	 * Fires only for user keyboard/IME input — not for programmatic
+	 * {@link Terminal.send}. Suppressed when `disableStdin` is true or when a
+	 * custom key event handler (see
+	 * {@link Terminal.attachCustomKeyEventHandler}) returns false.
+	 *
+	 * @param callback - Function receiving `{ key, domEvent }`
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onKey(
+		callback: (ev: { key: string; domEvent: KeyboardEvent }) => void,
+	): Disposable;
+
+	/**
+	 * Register a callback invoked when the terminal needs to send raw binary
+	 * (non-UTF8) data back to the host — typically mouse-report sequences.
+	 * Mirrors xterm.js `Terminal.onBinary`.
+	 *
+	 * Boundary: sterk routes ALL host-bound input (text and binary) through
+	 * {@link Terminal.onData} as the single source of truth. `onBinary` fires
+	 * additionally — at the same point — for the binary subset (mouse
+	 * reports), so consumers that need the xterm.js binary/text split can
+	 * subscribe to it without losing the unified `onData` stream.
+	 *
+	 * @param callback - Function receiving the binary payload as a string
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onBinary(callback: (data: string) => void): Disposable;
+
+	/**
+	 * Register a callback invoked after the renderer commits a repaint,
+	 * receiving the affected row range as `{ start, end }` (inclusive,
+	 * 0-based viewport rows). Mirrors xterm.js `Terminal.onRender`.
+	 *
+	 * No-op in headless mode (before {@link Terminal.open}).
+	 *
+	 * @param callback - Function receiving the repainted row range
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onRender(
+		callback: (range: { start: number; end: number }) => void,
+	): Disposable;
+
+	/**
+	 * Attach a custom key event handler, evaluated before the terminal
+	 * processes a key event. Returning `false` tells the terminal NOT to
+	 * process the event (no VT translation, no `onData` / `onKey`); returning
+	 * `true` (or anything truthy) lets normal processing proceed. Mirrors
+	 * xterm.js `Terminal.attachCustomKeyEventHandler`.
+	 *
+	 * Only one handler is active at a time; attaching replaces the previous.
+	 *
+	 * @param handler - Predicate run against each `KeyboardEvent`
+	 */
+	attachCustomKeyEventHandler(handler: (e: KeyboardEvent) => boolean): void;
+
+	/**
+	 * Attach a custom wheel event handler, evaluated before the terminal
+	 * processes a wheel event. Returning `false` tells the terminal NOT to
+	 * process the event (no scroll, no mouse-wheel report); returning `true`
+	 * lets normal processing proceed. Mirrors xterm.js
+	 * `Terminal.attachCustomWheelEventHandler`.
+	 *
+	 * Only one handler is active at a time; attaching replaces the previous.
+	 *
+	 * @param handler - Predicate run against each `WheelEvent`
+	 */
+	attachCustomWheelEventHandler(handler: (e: WheelEvent) => boolean): void;
+
+	/**
 	 * Register a callback invoked when the window/icon title changes via
 	 * OSC 0 (icon + window title) or OSC 2 (window title). The callback
 	 * receives the title string. Mirrors xterm.js `Terminal.onTitleChange`.
@@ -699,6 +773,68 @@ export interface TerminalOptions {
 	 * @default true
 	 */
 	allowSelection?: boolean;
+
+	/**
+	 * Convert `\n` (LF) to `\r\n` (CRLF) on {@link Terminal.write}.
+	 *
+	 * When true, a bare line feed in written data is treated as a carriage
+	 * return + line feed, so output that uses Unix-style `\n` line endings
+	 * (common from non-PTY data sources) lands at the start of the next row
+	 * instead of stair-stepping. Matches xterm.js `convertEol`.
+	 *
+	 * WIRED — behavioral, see {@link Terminal.write}.
+	 *
+	 * @default false
+	 */
+	convertEol?: boolean;
+
+	/**
+	 * Suppress keyboard/IME/mouse input from emitting `onData`.
+	 *
+	 * When true, the input surface still receives DOM events but the
+	 * terminal does not translate them into data sent to the host. Matches
+	 * xterm.js `disableStdin`. Programmatic {@link Terminal.send} /
+	 * {@link Terminal.paste} are NOT affected — only user input.
+	 *
+	 * WIRED — behavioral.
+	 *
+	 * @default false
+	 */
+	disableStdin?: boolean;
+
+	/**
+	 * Whether the cursor blinks.
+	 *
+	 * ACCEPTED-BUT-NOT-YET-WIRED: stored on `term.options` for xterm.js
+	 * compatibility. Sterk renders via Ace in read-only terminal mode and
+	 * does not yet drive a blinking cursor element, so this is a no-op at
+	 * the renderer level.
+	 *
+	 * @default false
+	 */
+	cursorBlink?: boolean;
+
+	/**
+	 * Cursor shape: `'block'`, `'underline'`, or `'bar'`.
+	 *
+	 * ACCEPTED-BUT-NOT-YET-WIRED: stored on `term.options` for xterm.js
+	 * compatibility. Ace's cursor styling does not map cleanly to the
+	 * terminal cursor shapes, so this is not yet projected to the renderer.
+	 *
+	 * @default 'block'
+	 */
+	cursorStyle?: "block" | "underline" | "bar";
+
+	/**
+	 * Cursor shape to use when the terminal is not focused. Same value set
+	 * as {@link TerminalOptions.cursorStyle}, plus `'outline'` and `'none'`.
+	 *
+	 * ACCEPTED-BUT-NOT-YET-WIRED: stored on `term.options` for xterm.js
+	 * compatibility.
+	 *
+	 * @default 'outline'
+	 */
+	cursorInactiveStyle?: "block" | "underline" | "bar" | "outline" | "none";
 }
 
 /**
