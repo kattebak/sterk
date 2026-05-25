@@ -78,6 +78,14 @@ export class AceRenderer {
 	private resizeObserver: ResizeObserver | null = null;
 	private resizeFrameHandle: number | null = null;
 	private lastObservedSize: { width: number; height: number } | null = null;
+	/**
+	 * When true, focusing the input surface (Ace's hidden textarea) pins the
+	 * viewport to the live screen. Backs `TerminalOptions.scrollToBottomOnFocus`
+	 * (default on). See {@link installFocusScrollToBottom}.
+	 */
+	private scrollToBottomOnFocus: boolean;
+	/** The Ace `focus` listener, kept so we can detach it on dispose. */
+	private focusHandler: (() => void) | null = null;
 
 	/**
 	 * Get the active buffer (normal or alternate).
@@ -93,7 +101,9 @@ export class AceRenderer {
 		private bufferNamespace: BufferNamespaceImpl,
 		fontSize: number,
 		fontFamily: string = "monospace",
+		scrollToBottomOnFocus: boolean = true,
 	) {
+		this.scrollToBottomOnFocus = scrollToBottomOnFocus;
 		// Create wrapper with sterk class
 		this.wrapper = document.createElement("div");
 		this.wrapper.classList.add("sterk");
@@ -168,6 +178,34 @@ export class AceRenderer {
 		// observer Ace keeps painting into the pre-keyboard viewport box and
 		// the bottom rows render behind the keyboard. See kattebak/sterk#14.
 		this.installResizeObserver();
+
+		// Snap the viewport to the live screen whenever the input surface gains
+		// focus (on mobile, focusing == summoning the soft keyboard). See the
+		// method JSDoc for the mobile UX rationale.
+		this.installFocusScrollToBottom();
+	}
+
+	/**
+	 * Wire a listener on Ace's `focus` event so that focusing the input
+	 * surface pins the viewport to the live screen (scroll-to-bottom).
+	 *
+	 * Why the renderer: Ace owns the hidden textarea (`.ace_text-input`) that
+	 * actually receives DOM focus and summons the soft keyboard. Ace's editor
+	 * `"focus"` event fires for BOTH user taps and programmatic
+	 * `editor.focus()` — so `Terminal.focus()` composes here too (focusing
+	 * always lands the user at the latest output, which is the intended
+	 * behavior).
+	 *
+	 * Gated by {@link scrollToBottomOnFocus} (default on). When already pinned
+	 * to the bottom this is a cheap no-op (the buffer clamps viewportY to its
+	 * max and `updateScroll` re-anchors the same scrollTop).
+	 */
+	private installFocusScrollToBottom(): void {
+		this.focusHandler = () => {
+			if (this.disposed || !this.scrollToBottomOnFocus) return;
+			this.scrollToBottom();
+		};
+		this.editor.on("focus", this.focusHandler);
 	}
 
 	/**
@@ -980,6 +1018,13 @@ export class AceRenderer {
 			this.resizeFrameHandle = null;
 		}
 		this.lastObservedSize = null;
+
+		// Detach the focus → scroll-to-bottom listener before destroying the
+		// editor it's bound to.
+		if (this.focusHandler) {
+			this.editor.off("focus", this.focusHandler);
+			this.focusHandler = null;
+		}
 
 		// Resolve any pending update promise so awaiters (e.g. a
 		// `refresh()` blocked on the next rAF flush) don't dangle.

@@ -163,6 +163,7 @@ export class TerminalImpl implements Terminal {
 			cursorBlink: options?.cursorBlink ?? false,
 			cursorStyle: options?.cursorStyle ?? "block",
 			cursorInactiveStyle: options?.cursorInactiveStyle ?? "outline",
+			scrollToBottomOnFocus: options?.scrollToBottomOnFocus ?? true,
 		};
 
 		// Create buffer
@@ -641,6 +642,7 @@ export class TerminalImpl implements Terminal {
 			this.bufferNamespace,
 			this._options.fontSize,
 			this._options.fontFamily,
+			this._options.scrollToBottomOnFocus,
 		);
 
 		// Surface renderer repaints as onRender (xterm.js parity).

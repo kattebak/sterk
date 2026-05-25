@@ -1097,6 +1097,27 @@ export interface TerminalOptions {
 	 * @default 'outline'
 	 */
 	cursorInactiveStyle?: "block" | "underline" | "bar" | "outline" | "none";
+
+	/**
+	 * Snap the viewport to the live screen (scroll-to-bottom) whenever the
+	 * terminal's input surface gains focus.
+	 *
+	 * Mobile rationale: on touch browsers the soft keyboard is summoned by
+	 * FOCUSING the input surface (tapping the terminal). Wiring scroll-to-
+	 * bottom to that focus event turns "tap to bring up the keyboard" into a
+	 * fast jump-to-latest gesture — when the user taps to type, the viewport
+	 * leaves scrollback and pins to the live screen so what they type appears
+	 * where they're looking.
+	 *
+	 * Composes with the programmatic {@link Terminal.focus} API: calling
+	 * `focus()` also pins to the bottom, which is consistent (focus == ready
+	 * to type == show me the prompt).
+	 *
+	 * WIRED — behavioral, see the renderer focus handler.
+	 *
+	 * @default true
+	 */
+	scrollToBottomOnFocus?: boolean;
 }
 
 /**
