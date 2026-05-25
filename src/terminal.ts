@@ -35,7 +35,9 @@ import type {
 	DcsHandler,
 	Disposable,
 	EscHandler,
+	IModes,
 	ITerminalAddon,
+	IUnicodeHandling,
 	OscHandler,
 	Parser,
 	ParserHandlerIdentifier,
@@ -43,6 +45,14 @@ import type {
 	TerminalOptions,
 } from "./types.js";
 import { EventEmitter } from "./util/event_emitter.js";
+
+/**
+ * The Unicode version sterk's `wcwidth` column-width tables target. The
+ * `wcwidth` module ports Markus Kuhn's data extended with the Unicode 9–15
+ * emoji blocks (see `src/util/wcwidth.ts`), so we report `"15"`. Surfaced
+ * via `Terminal.unicode.activeVersion` (xterm.js parity).
+ */
+const UNICODE_VERSION = "15";
 
 /**
  * Parser implementation that satisfies the Parser interface
@@ -87,6 +97,9 @@ export class TerminalImpl implements Terminal {
 	private _options: Required<TerminalOptions>;
 	// Renderer components (optional, for DOM mode)
 	private aceRenderer: AceRenderer | null = null;
+	// Host container passed to `open()`; backs `Terminal.element`. Cleared on
+	// `dispose()` so the accessor reports headless again after teardown.
+	private containerElement: HTMLElement | null = null;
 	private inputHandler: InputHandler | null = null;
 	private mouseHandler: MouseHandler | null = null;
 	private linkDetector: LinkDetector | null = null;
@@ -98,6 +111,17 @@ export class TerminalImpl implements Terminal {
 	// handler. See `handleDecPrivateMode` for the protocol wire-up.
 	private pendingMouseTracking: MouseTrackingMode = MouseTrackingMode.Off;
 	private pendingMouseEncoding: MouseEncoding = MouseEncoding.Default;
+
+	// ── Mode state (xterm.js `Terminal.modes` parity) ────────────────
+	// Tracked here at the terminal level — these are toggled by the DEC
+	// private-mode / IRM escapes the parser dispatches into
+	// `handleDecPrivateMode` / `handleCsiDispatch`. Modes sterk does not
+	// track (applicationKeypad, origin, reverseWraparound) are reported as
+	// their xterm.js defaults from the `modes` getter, not stored here.
+	private applicationCursorKeysMode = false; // DECCKM (?1)
+	private bracketedPasteMode = false; // ?2004
+	private insertMode = false; // IRM (CSI 4 h)
+	private sendFocusMode = false; // ?1004
 
 	// Custom key/wheel handlers can be attached before `open()` wires the
 	// input/mouse handlers (xterm.js allows this). Buffer them here and flush
@@ -163,6 +187,12 @@ export class TerminalImpl implements Terminal {
 			cursorBlink: options?.cursorBlink ?? false,
 			cursorStyle: options?.cursorStyle ?? "block",
 			cursorInactiveStyle: options?.cursorInactiveStyle ?? "outline",
+			lineHeight: options?.lineHeight ?? 1.0,
+			letterSpacing: options?.letterSpacing ?? 0,
+			fontWeight: options?.fontWeight ?? "normal",
+			tabStopWidth: options?.tabStopWidth ?? 8,
+			wordSeparator: options?.wordSeparator ?? " ()[]{}'\",.;:",
+			screenReaderMode: options?.screenReaderMode ?? false,
 		};
 
 		// Create buffer
@@ -222,6 +252,73 @@ export class TerminalImpl implements Terminal {
 
 	get buffer(): BufferNamespace {
 		return this.bufferNamespace;
+	}
+
+	/**
+	 * The host container element passed to {@link open}, or `undefined` in
+	 * headless mode (before `open()` / after `dispose()`). xterm.js
+	 * `Terminal.element` parity.
+	 */
+	get element(): HTMLElement | undefined {
+		return this.containerElement ?? undefined;
+	}
+
+	/**
+	 * The hidden `<textarea>` Ace uses to capture keyboard/IME input, or
+	 * `undefined` in headless mode. Resolved from the Ace editor's text
+	 * input element. xterm.js `Terminal.textarea` parity.
+	 */
+	get textarea(): HTMLTextAreaElement | undefined {
+		return this.aceRenderer?.getTextarea() ?? undefined;
+	}
+
+	/**
+	 * Read-only snapshot of the terminal's current modes. xterm.js
+	 * `Terminal.modes` parity. Tracked modes reflect live state; untracked
+	 * modes report the xterm.js default. See {@link IModes}.
+	 */
+	get modes(): IModes {
+		return {
+			applicationCursorKeysMode: this.applicationCursorKeysMode,
+			// Not tracked — xterm.js default.
+			applicationKeypadMode: false,
+			bracketedPasteMode: this.bracketedPasteMode,
+			insertMode: this.insertMode,
+			mouseTrackingMode: this.mouseTrackingModeName(),
+			// Not tracked — xterm.js default.
+			originMode: false,
+			// Not tracked — xterm.js default.
+			reverseWraparoundMode: false,
+			sendFocusMode: this.sendFocusMode,
+			// sterk always wraps at the right margin → xterm default `true`.
+			wraparoundMode: true,
+		};
+	}
+
+	/**
+	 * Map the tracked DEC mouse-tracking mode to the xterm.js
+	 * `mouseTrackingMode` string. `'x10'` (DEC `?9`) is never reported —
+	 * sterk does not track press-only mode.
+	 */
+	private mouseTrackingModeName(): IModes["mouseTrackingMode"] {
+		switch (this.pendingMouseTracking) {
+			case MouseTrackingMode.VT200:
+				return "vt200";
+			case MouseTrackingMode.CellMotion:
+				return "drag";
+			case MouseTrackingMode.AllMotion:
+				return "any";
+			default:
+				return "none";
+		}
+	}
+
+	/**
+	 * Unicode-handling surface. Reports the Unicode version sterk's
+	 * `wcwidth` targets. xterm.js `Terminal.unicode` (read subset) parity.
+	 */
+	get unicode(): IUnicodeHandling {
+		return { activeVersion: UNICODE_VERSION };
 	}
 
 	/**
@@ -321,6 +418,12 @@ export class TerminalImpl implements Terminal {
 		// fresh UTF-8 decoder). This also re-seeds currentAttrs, which is
 		// harmless overlap with clear() above.
 		this.vtParser.reset();
+		// Reset tracked terminal modes to their power-on defaults so a
+		// post-reset `Terminal.modes` read reports the clean state.
+		this.applicationCursorKeysMode = false;
+		this.bracketedPasteMode = false;
+		this.insertMode = false;
+		this.sendFocusMode = false;
 		if (this.aceRenderer) {
 			this.aceRenderer.onBufferSwitch();
 		}
@@ -344,8 +447,10 @@ export class TerminalImpl implements Terminal {
 
 	/**
 	 * Inject `data` as if pasted. Routes through the same `onData` path as
-	 * `send()`. Bracketed-paste mode (DEC 2004) is not tracked in this
-	 * codebase, so the paste is delivered verbatim (plain paste).
+	 * `send()`. The bracketed-paste mode flag (DEC 2004) is now tracked and
+	 * surfaced via `Terminal.modes.bracketedPasteMode`, but this path still
+	 * delivers the paste verbatim (plain paste) — it does not yet wrap the
+	 * data in `\x1b[200~`…`\x1b[201~` markers when the mode is set.
 	 */
 	paste(data: string): void {
 		this.send(data);
@@ -635,6 +740,9 @@ export class TerminalImpl implements Terminal {
 			throw new Error("Terminal is already opened");
 		}
 
+		// Remember the host element so `Terminal.element` can surface it.
+		this.containerElement = container;
+
 		// Create renderer
 		this.aceRenderer = new AceRenderer(
 			container,
@@ -642,6 +750,12 @@ export class TerminalImpl implements Terminal {
 			this._options.fontSize,
 			this._options.fontFamily,
 		);
+
+		// Project the line-height multiplier onto Ace (xterm.js `lineHeight`).
+		// A value of 1.0 leaves Ace's natural line height untouched.
+		if (this._options.lineHeight !== 1.0) {
+			this.aceRenderer.setLineHeight(this._options.lineHeight);
+		}
 
 		// Surface renderer repaints as onRender (xterm.js parity).
 		this.aceRenderer.onRender((range) => {
@@ -940,6 +1054,9 @@ export class TerminalImpl implements Terminal {
 			this.aceRenderer.dispose();
 			this.aceRenderer = null;
 		}
+		// Drop the host element reference so `element`/`textarea` report
+		// headless (undefined) again after teardown.
+		this.containerElement = null;
 		if (this.inputHandler) {
 			this.inputHandler.dispose();
 			this.inputHandler = null;
@@ -993,9 +1110,14 @@ export class TerminalImpl implements Terminal {
 
 			case 0x09: // HT (horizontal tab)
 				{
-					// Tab to next 8-column boundary
+					// Tab to the next tab-stop boundary. The stop width is
+					// configurable via `options.tabStopWidth` (xterm.js parity);
+					// it defaults to 8. Guard against a non-positive width so a
+					// bad option can't divide-by-zero / stall the cursor.
+					const tabWidth =
+						this._options.tabStopWidth > 0 ? this._options.tabStopWidth : 8;
 					const x = this.scrollBuffer.cursorX;
-					const nextTab = Math.floor((x + 8) / 8) * 8;
+					const nextTab = Math.floor((x + tabWidth) / tabWidth) * tabWidth;
 					this.scrollBuffer.setCursor(
 						Math.min(nextTab, this.cols - 1),
 						this.scrollBuffer.cursorY,
@@ -1173,6 +1295,10 @@ export class TerminalImpl implements Terminal {
 				// Check for DEC private modes (indicated by '?' intermediate)
 				if (_intermediates.length === 1 && _intermediates[0] === 0x3f) {
 					this.handleDecPrivateMode(params, final === 0x68);
+				} else if (_intermediates.length === 0) {
+					// Standard (non-private) ANSI modes. We track IRM (mode 4),
+					// the insert/replace mode, for `Terminal.modes.insertMode`.
+					this.handleAnsiMode(params, final === 0x68);
 				}
 				break;
 
@@ -1329,6 +1455,23 @@ export class TerminalImpl implements Terminal {
 			if (mode === undefined) continue;
 
 			switch (mode) {
+				case 1: // DECCKM - Application cursor keys
+					// Tracked for `Terminal.modes.applicationCursorKeysMode`.
+					this.applicationCursorKeysMode = set;
+					break;
+
+				case 2004: // Bracketed paste mode
+					// Tracked for `Terminal.modes.bracketedPasteMode`. Note
+					// `paste()` still delivers a plain paste regardless.
+					this.bracketedPasteMode = set;
+					break;
+
+				case 1004: // Focus reporting
+					// Tracked for `Terminal.modes.sendFocusMode`. Emitting the
+					// focus-in/out reports themselves is not yet wired.
+					this.sendFocusMode = set;
+					break;
+
 				case 1047: // DECSET 1047 - Switch to/from alternate screen
 					if (set) {
 						this.bufferNamespace.switchToAlternate();
@@ -1398,6 +1541,24 @@ export class TerminalImpl implements Terminal {
 				// Other DEC private modes - ignore for now
 				default:
 					break;
+			}
+		}
+	}
+
+	/**
+	 * Handle standard (non-private) ANSI modes (`CSI <n> h` / `CSI <n> l`).
+	 *
+	 * Only IRM (mode 4, insert/replace) is tracked, surfaced via
+	 * `Terminal.modes.insertMode`. sterk records the flag but the buffer
+	 * write path does not yet shift cells on insert — see the `insertMode`
+	 * JSDoc on {@link IModes}. Other ANSI modes are ignored.
+	 */
+	private handleAnsiMode(params: number[][], set: boolean): void {
+		for (const paramGroup of params) {
+			const mode = paramGroup?.[0];
+			if (mode === undefined) continue;
+			if (mode === 4) {
+				this.insertMode = set;
 			}
 		}
 	}

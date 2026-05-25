@@ -384,6 +384,42 @@ export interface Terminal {
 	open?(container: HTMLElement): void;
 
 	/**
+	 * The terminal's container element — the host element passed to
+	 * {@link Terminal.open}. Mirrors xterm.js `Terminal.element`.
+	 *
+	 * `undefined` in headless mode (before {@link Terminal.open} is called)
+	 * and after {@link Terminal.dispose}.
+	 */
+	readonly element?: HTMLElement | undefined;
+
+	/**
+	 * The hidden input `<textarea>` the renderer (Ace) uses to capture
+	 * keyboard / IME input. Mirrors xterm.js `Terminal.textarea`.
+	 *
+	 * `undefined` in headless mode (before {@link Terminal.open}) and after
+	 * {@link Terminal.dispose}.
+	 */
+	readonly textarea?: HTMLTextAreaElement | undefined;
+
+	/**
+	 * Read-only snapshot of the terminal's current modes. Mirrors xterm.js
+	 * `Terminal.modes` ({@link IModes}). Each access returns a fresh snapshot
+	 * reflecting the modes sterk's parser tracks; modes sterk does not track
+	 * report the xterm.js default. See {@link IModes} for per-field details.
+	 */
+	readonly modes: IModes;
+
+	/**
+	 * Unicode handling surface. Mirrors a minimal subset of xterm.js
+	 * `Terminal.unicode`. Sterk reports the Unicode version its `wcwidth`
+	 * implementation targets via {@link IUnicodeHandling.activeVersion}.
+	 *
+	 * Pluggable Unicode version providers (xterm.js
+	 * `unicode.register/versions`) are out of scope and not implemented.
+	 */
+	readonly unicode: IUnicodeHandling;
+
+	/**
 	 * Get the pixel dimensions of a single character cell.
 	 * Used for scroll calculations and viewport sizing on mobile.
 	 *
@@ -529,6 +565,94 @@ export interface Terminal {
 	 * The Terminal instance should not be used after calling dispose().
 	 */
 	dispose(): void;
+}
+
+// ── Modes & Unicode ──────────────────────────────────────────────────
+
+/**
+ * Read-only snapshot of the terminal's currently-active modes. Mirrors
+ * xterm.js `IModes` (returned by `Terminal.modes`).
+ *
+ * Each field reports the live state of a parser-tracked mode. For modes
+ * sterk's VT core does not yet track, the field reports the xterm.js
+ * power-on default (mostly `false` / `'none'`) and is documented as such
+ * below — sterk never fabricates a state it cannot observe.
+ *
+ * Tracked today (driven by DEC private-mode escapes the parser honours):
+ * - {@link IModes.applicationCursorKeysMode} (DECCKM, `?1`)
+ * - {@link IModes.bracketedPasteMode} (`?2004`)
+ * - {@link IModes.insertMode} (IRM, `CSI 4 h`)
+ * - {@link IModes.mouseTrackingMode} (`?1000`/`?1002`/`?1003`)
+ * - {@link IModes.sendFocusMode} (`?1004`)
+ *
+ * Not yet tracked — reports the xterm.js default:
+ * - {@link IModes.applicationKeypadMode} (DECPAM/DECPNM) → `false`
+ * - {@link IModes.originMode} (DECOM, `?6`) → `false`
+ * - {@link IModes.reverseWraparoundMode} (`?45`) → `false`
+ * - {@link IModes.wraparoundMode} (DECAWM, `?7`) → xterm default `true`
+ */
+export interface IModes {
+	/** DECCKM (`?1`). TRACKED: arrow keys emit SS3 (`\x1bOA`) when set. */
+	readonly applicationCursorKeysMode: boolean;
+
+	/** DECPAM/DECPNM. NOT-YET-TRACKED — reports xterm default `false`. */
+	readonly applicationKeypadMode: boolean;
+
+	/**
+	 * Bracketed paste (`?2004`). TRACKED (state only): the flag is recorded
+	 * but {@link Terminal.paste} still delivers a plain paste regardless.
+	 */
+	readonly bracketedPasteMode: boolean;
+
+	/**
+	 * Insert/replace mode (IRM, `CSI 4 h`). TRACKED (state only): the flag is
+	 * recorded but the buffer write path does not yet shift cells on insert.
+	 */
+	readonly insertMode: boolean;
+
+	/**
+	 * Active mouse-tracking protocol. TRACKED — mapped from the DEC modes:
+	 * `'vt200'`=`?1000`, `'drag'`=`?1002`, `'any'`=`?1003`, else `'none'`.
+	 * `'x10'` (`?9`) is in the union for xterm parity but never reported
+	 * (sterk does not track mode 9).
+	 */
+	readonly mouseTrackingMode: "none" | "x10" | "vt200" | "drag" | "any";
+
+	/** DECOM (`?6`). NOT-YET-TRACKED — reports xterm default `false`. */
+	readonly originMode: boolean;
+
+	/** `?45`. NOT-YET-TRACKED — reports xterm default `false`. */
+	readonly reverseWraparoundMode: boolean;
+
+	/**
+	 * Focus reporting (`?1004`). TRACKED (state only): the flag is recorded
+	 * but emitting the focus-in/out reports is not yet wired.
+	 */
+	readonly sendFocusMode: boolean;
+
+	/**
+	 * Auto-wrap (DECAWM, `?7`). NOT-YET-TRACKED as a distinct flag — sterk
+	 * always wraps at the right margin, so this reports the xterm default
+	 * `true`.
+	 */
+	readonly wraparoundMode: boolean;
+}
+
+/**
+ * Minimal Unicode-handling surface. Mirrors the read side of xterm.js
+ * `Terminal.unicode`.
+ *
+ * Sterk's column-width logic (`wcwidth`) targets a fixed Unicode version;
+ * {@link IUnicodeHandling.activeVersion} reports it. The full pluggable
+ * provider API (registering alternate width tables, switching versions at
+ * runtime) is out of scope.
+ */
+export interface IUnicodeHandling {
+	/**
+	 * The Unicode version sterk's width calculations target, as a string
+	 * (e.g. `"15"`). Read-only — sterk does not support switching versions.
+	 */
+	readonly activeVersion: string;
 }
 
 // ── Buffer Access ────────────────────────────────────────────────────
@@ -1097,6 +1221,73 @@ export interface TerminalOptions {
 	 * @default 'outline'
 	 */
 	cursorInactiveStyle?: "block" | "underline" | "bar" | "outline" | "none";
+
+	/**
+	 * Line height as a multiplier of the font size (xterm.js `lineHeight`).
+	 *
+	 * WIRED — projected onto Ace's `renderer.lineHeight`
+	 * (`fontSize * lineHeight`), observable via {@link Terminal.getCellMetrics}
+	 * once {@link Terminal.open} has measured the editor.
+	 *
+	 * @default 1.0
+	 */
+	lineHeight?: number;
+
+	/**
+	 * Extra horizontal spacing between characters, in pixels (xterm.js
+	 * `letterSpacing`).
+	 *
+	 * ACCEPTED-BUT-NOT-YET-WIRED: stored on `term.options` only. Ace measures
+	 * character advance from the font and exposes no letter-spacing knob that
+	 * keeps the monospace grid aligned, so sterk does not project this yet.
+	 *
+	 * @default 0
+	 */
+	letterSpacing?: number;
+
+	/**
+	 * Font weight for normal (non-bold) text — a CSS font-weight value
+	 * (xterm.js `fontWeight`).
+	 *
+	 * ACCEPTED-BUT-NOT-YET-WIRED: stored on `term.options` only. sterk drives
+	 * bold via SGR token classes rather than a renderer-wide weight.
+	 *
+	 * @default 'normal'
+	 */
+	fontWeight?: string | number;
+
+	/**
+	 * Number of columns between tab stops (xterm.js `tabStopWidth`).
+	 *
+	 * WIRED — the HT (`0x09`) handler advances the cursor to the next
+	 * multiple of this width instead of the hard-coded 8.
+	 *
+	 * @default 8
+	 */
+	tabStopWidth?: number;
+
+	/**
+	 * Characters treated as word boundaries for double-click word selection
+	 * (xterm.js `wordSeparator`).
+	 *
+	 * ACCEPTED-BUT-NOT-YET-WIRED: stored on `term.options` only. Word
+	 * selection is delegated to Ace's tokenizer-driven boundaries; sterk does
+	 * not yet override them from this option.
+	 *
+	 * @default ' ()[]{}\'",.;:'
+	 */
+	wordSeparator?: string;
+
+	/**
+	 * Hint that a screen reader is in use (xterm.js `screenReaderMode`).
+	 *
+	 * ACCEPTED-BUT-NOT-YET-WIRED: stored on `term.options` only. sterk relies
+	 * on Ace's accessibility surface and does not yet add a dedicated
+	 * live-region tree for terminal output.
+	 *
+	 * @default false
+	 */
+	screenReaderMode?: boolean;
 }
 
 /**

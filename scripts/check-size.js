@@ -8,15 +8,20 @@ import { execSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-// Soft budget: < 350kB packed. The single biggest line item is the
+// Soft budget: < 355kB packed. The single biggest line item is the
 // vendored fonts under assets/fonts/ (~200 kB total: 5 primary TUI-
 // coverage subsets at 25–55 kB each + the shared `SterkTUISymbols`
-// fallback at ~25 kB). The JS/dts payload is ~100 kB packed. We hold
-// 350 kB as the line in the sand — anything above suggests an
+// fallback at ~25 kB). The JS/dts payload is ~105 kB packed. We hold
+// this as the line in the sand — anything above suggests an
 // accidentally re-introduced unsubsetted font, a duplicated source
 // map, or a dependency creep regression that should be investigated
 // before publish.
-const BUDGET_KB = 350;
+//
+// History: raised 350 → 355 kB (kattebak/sterk#36) for the xterm
+// element/textarea/modes/unicode accessors + lineHeight/letterSpacing/
+// tabStopWidth/wordSeparator options — pure public-API `.d.ts` growth,
+// not a font/sourcemap/dependency regression.
+const BUDGET_KB = 355;
 
 /**
  * Get total size of dist/ directory
