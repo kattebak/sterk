@@ -192,6 +192,83 @@ export class TerminalImpl implements Terminal {
 		}
 	}
 
+	/**
+	 * Write data followed by CRLF. xterm-compatible convenience wrapper.
+	 */
+	writeln(data: string | Uint8Array, callback?: () => void): void {
+		const str =
+			typeof data === "string" ? data : new TextDecoder().decode(data);
+		this.write(`${str}\r\n`, callback);
+	}
+
+	/**
+	 * Full terminal reset (RIS-like).
+	 *
+	 * Resets the terminal to its power-on state:
+	 * - if the alternate screen is active, switch back to the normal buffer
+	 *   first (so the visible/normal buffer is the one we clear)
+	 * - clear the buffer and home the cursor (reuses `clear()`, which also
+	 *   re-seeds `currentAttrs` to the defaults)
+	 * - reset the VT parser to GROUND, dropping any half-parsed sequence and
+	 *   pending UTF-8 bytes, and re-seeding its SGR attrs
+	 * - notify the renderer of the buffer switch and schedule a repaint
+	 *
+	 * Registered OSC handlers and `onData`/`onWriteParsed` subscriptions are
+	 * preserved — a reset clears terminal *content/state*, not consumer
+	 * wiring.
+	 */
+	reset(): void {
+		// Leave the alternate screen if we're in it, so the cleared buffer is
+		// the normal one the user sees post-reset.
+		if (this.bufferNamespace.isAlternate()) {
+			this.bufferNamespace.switchToNormal();
+		}
+		// clear() empties the active buffer, homes the cursor, and resets
+		// currentAttrs to DEFAULT_CELL_ATTRIBUTES.
+		this.clear();
+		// Bring the parser back to power-on (GROUND state + default SGR +
+		// fresh UTF-8 decoder). This also re-seeds currentAttrs, which is
+		// harmless overlap with clear() above.
+		this.vtParser.reset();
+		if (this.aceRenderer) {
+			this.aceRenderer.onBufferSwitch();
+		}
+	}
+
+	/**
+	 * Move keyboard focus to the terminal input surface (Ace editor).
+	 * No-op in headless mode.
+	 */
+	focus(): void {
+		this.aceRenderer?.focus();
+	}
+
+	/**
+	 * Remove keyboard focus from the terminal input surface (Ace editor).
+	 * No-op in headless mode.
+	 */
+	blur(): void {
+		this.aceRenderer?.blur();
+	}
+
+	/**
+	 * Inject `data` as if pasted. Routes through the same `onData` path as
+	 * `send()`. Bracketed-paste mode (DEC 2004) is not tracked in this
+	 * codebase, so the paste is delivered verbatim (plain paste).
+	 */
+	paste(data: string): void {
+		this.send(data);
+	}
+
+	/**
+	 * Alias of `send()` for xterm.js compatibility. `wasUserInput` is
+	 * accepted for signature parity but ignored — this path makes no
+	 * synthetic-vs-user distinction.
+	 */
+	input(data: string | Uint8Array, _wasUserInput?: boolean): void {
+		this.send(data);
+	}
+
 	resize(cols: number, rows: number): void {
 		this._options.cols = cols;
 		this._options.rows = rows;

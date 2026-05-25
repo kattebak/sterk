@@ -642,6 +642,27 @@ export class VtParser {
 	}
 
 	/**
+	 * Reset the parser to its power-on (GROUND) state.
+	 *
+	 * Clears any half-parsed escape/CSI/OSC sequence (intermediates,
+	 * params, OSC buffer), drops the UTF-8 decoder's pending bytes, and
+	 * restores the current SGR attributes to the defaults. Registered OSC
+	 * handlers are intentionally preserved — they are consumer-owned
+	 * subscriptions, not parser state, and a RIS should not silently
+	 * unwire shell-integration handlers. Used by `Terminal.reset()`.
+	 */
+	reset(): void {
+		this.state = ParserState.GROUND;
+		this.intermediates = [];
+		this.params = [[]];
+		this.currentParam = 0;
+		this.oscData = "";
+		this.oscPendingEscape = false;
+		this.utf8Decoder = new Utf8Decoder();
+		this.currentAttrs = { ...DEFAULT_CELL_ATTRIBUTES };
+	}
+
+	/**
 	 * Transition to a new state
 	 */
 	private transitionTo(newState: ParserState): void {

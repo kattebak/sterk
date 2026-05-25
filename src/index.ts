@@ -21,7 +21,6 @@ export type {
 	Disposable,
 	OscHandler,
 	Parser,
-	Terminal,
 	TerminalOptions,
 	Theme,
 } from "./types.js";
@@ -81,7 +80,39 @@ export { EventEmitter } from "./util/event_emitter.js";
 // ── Constructor Stub ─────────────────────────────────────────────────
 
 import { TerminalImpl } from "./terminal.js";
-import type { Terminal, TerminalOptions } from "./types.js";
+import type { Terminal as TerminalInstance, TerminalOptions } from "./types.js";
+
+/**
+ * `Terminal` constructor — xterm.js-compatible entry point.
+ *
+ * `new Terminal(options?)` constructs a terminal instance, mirroring
+ * `@xterm/xterm`'s `new Terminal(...)`. The public `Terminal` *type* (the
+ * interface in `./types.js`) still describes the resulting instances, so
+ * `const t: Terminal = new Terminal()` type-checks: this value export and
+ * the type export share the name by design (a class-like value/type merge).
+ *
+ * `createTerminal(options?)` remains available and delegates here, so
+ * existing consumers are unaffected.
+ *
+ * @example
+ * ```typescript
+ * import { Terminal } from '@kattebak/sterk';
+ *
+ * const term = new Terminal({ cols: 80, rows: 24 });
+ * term.writeln('Hello, world!');
+ * ```
+ */
+export const Terminal = TerminalImpl as unknown as {
+	new (options?: TerminalOptions): TerminalInstance;
+};
+
+/**
+ * The public `Terminal` type describes terminal *instances* (the interface
+ * defined in `./types.js`). Declaring it here lets the single name `Terminal`
+ * serve as both a value (the constructor above) and a type — so both
+ * `new Terminal()` and `const t: Terminal` resolve as a consumer expects.
+ */
+export type Terminal = TerminalInstance;
 
 /**
  * Create a new Terminal instance.
@@ -107,6 +138,6 @@ import type { Terminal, TerminalOptions } from "./types.js";
  * term.write('\x1b[1;31mBold red text\x1b[0m\n');
  * ```
  */
-export function createTerminal(options?: TerminalOptions): Terminal {
-	return new TerminalImpl(options);
+export function createTerminal(options?: TerminalOptions): TerminalInstance {
+	return new Terminal(options);
 }
