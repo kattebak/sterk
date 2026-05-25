@@ -164,13 +164,72 @@ async function setFont(fontId) {
 	await nextFrame();
 }
 
+/**
+ * Read the ACTUAL rendered Ace DOM and return, per visible `.ace_line` in
+ * document order: the concatenated textContent and the list of styled spans
+ * `{ text, className }`. This is what the user actually sees on screen — the
+ * counterpart to `dumpState()` (which reads the proven-correct buffer).
+ *
+ * Defensive: returns an empty list if the text layer hasn't mounted yet.
+ *
+ * Ace renders each visible row as a `.ace_line` element inside
+ * `.ace_text-layer`. A run of cells with identical attributes is one child
+ * span whose className is `ace_<seg>` (joined by spaces for each `.`-segment
+ * of the token type). Default (unstyled) runs are plain text nodes with no
+ * wrapping span — those carry an empty className in the dump.
+ */
+function dumpDom() {
+	const layer = container.querySelector(".ace_text-layer");
+	if (!layer) return { lines: [] };
+	const lineEls = Array.from(layer.querySelectorAll(".ace_line"));
+	const lines = lineEls.map((lineEl) => {
+		const spans = [];
+		for (const node of Array.from(lineEl.childNodes)) {
+			if (node.nodeType === Node.TEXT_NODE) {
+				// Unstyled run (default attrs) — no wrapping span.
+				const text = node.textContent ?? "";
+				if (text.length > 0) spans.push({ text, className: "" });
+			} else if (node.nodeType === Node.ELEMENT_NODE) {
+				const el = /** @type {Element} */ (node);
+				spans.push({
+					text: el.textContent ?? "",
+					className: el.getAttribute("class") ?? "",
+				});
+			}
+		}
+		return {
+			text: lineEl.textContent ?? "",
+			spans,
+		};
+	});
+	return { lines };
+}
+
+/**
+ * Write an array of frames sequentially, each through the same
+ * write+refresh+nextFrame path as `feedRaw`, so in-place animations can be
+ * driven to a known final state deterministically. Resolves after the last
+ * frame's paint commits.
+ */
+async function feedFrames(frames) {
+	for (const f of frames) {
+		await feedRaw(f);
+	}
+}
+
 function dumpState() {
 	const buffer = term.buffer.active;
 	const lines = [];
+	const linesRaw = [];
 	for (let y = 0; y < buffer.length; y++) {
 		const line = buffer.getLine(y);
 		if (!line) continue;
+		// `lines` keeps the historical fully-trimmed form (existing specs
+		// depend on it). `linesRaw` is the UNTRIMMED line text — needed for
+		// DOM/buffer parity, where the DOM keeps leading spaces but
+		// translateToString(true) strips them.
 		lines.push(line.translateToString(true));
+		linesRaw.push(line.translateToString(false));
 	}
 	return {
 		cols: term.cols,
@@ -181,6 +240,7 @@ function dumpState() {
 		viewportY: buffer.viewportY,
 		length: buffer.length,
 		lines,
+		linesRaw,
 	};
 }
 
@@ -298,6 +358,8 @@ window.__sterkTest = {
 	setTheme,
 	setFont,
 	dumpState,
+	dumpDom,
+	feedFrames,
 	reset,
 	feedBurst,
 	scrollToRow,
