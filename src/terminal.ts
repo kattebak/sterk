@@ -73,6 +73,15 @@ export class TerminalImpl implements Terminal {
 	private pendingMouseTracking: MouseTrackingMode = MouseTrackingMode.Off;
 	private pendingMouseEncoding: MouseEncoding = MouseEncoding.Default;
 
+	// Selection-change subscriptions. Buffered so callers can subscribe in
+	// headless mode (before `open()`); each entry is wired to the Ace
+	// selection emitter when the renderer is created, and torn down on
+	// `dispose()` or when the returned Disposable is disposed.
+	private selectionSubscriptions: Array<{
+		callback: () => void;
+		unsubscribe: (() => void) | null;
+	}> = [];
+
 	constructor(options?: TerminalOptions) {
 		// Resolve the font option. The contract: bare `createTerminal()` must
 		// render with a bundled font (JetBrains Mono) so consumers don't have
@@ -517,6 +526,13 @@ export class TerminalImpl implements Terminal {
 			this.emitter.emit("link-click", link);
 		});
 
+		// Wire any selection-change subscriptions buffered before open().
+		for (const entry of this.selectionSubscriptions) {
+			if (!entry.unsubscribe) {
+				entry.unsubscribe = this.aceRenderer.onSelectionChange(entry.callback);
+			}
+		}
+
 		// Initial render
 		this.aceRenderer.scheduleUpdate();
 	}
@@ -601,7 +617,132 @@ export class TerminalImpl implements Terminal {
 		}
 	}
 
+	// ── Selection API (xterm.js-compatible) ──────────────────────────
+	//
+	// Delegates to Ace's selection model via the renderer. Ace document
+	// rows are kept 1:1 with buffer ABSOLUTE rows (see AceRenderer
+	// `syncBufferToDocument`), so:
+	//   - viewport-relative rows (xterm `select`) → add `viewportY`
+	//   - absolute rows (xterm `selectLines`, `getSelectionPosition`) pass
+	//     through unchanged.
+	// All methods are no-ops in headless mode (no renderer attached).
+
+	/**
+	 * Whether there is a non-empty selection. See {@link Terminal.hasSelection}.
+	 */
+	hasSelection(): boolean {
+		return this.aceRenderer?.hasSelection() ?? false;
+	}
+
+	/**
+	 * The currently selected text. See {@link Terminal.getSelection}.
+	 */
+	getSelection(): string {
+		return this.aceRenderer?.getSelectedText() ?? "";
+	}
+
+	/**
+	 * The selection position in absolute buffer coordinates, or undefined
+	 * when there is no selection. See {@link Terminal.getSelectionPosition}.
+	 *
+	 * Ace document rows map 1:1 onto absolute buffer rows, so the Ace range
+	 * rows are returned directly as `y`; columns map directly to `x`.
+	 */
+	getSelectionPosition():
+		| { start: { x: number; y: number }; end: { x: number; y: number } }
+		| undefined {
+		const range = this.aceRenderer?.getSelectionRange();
+		if (!range) return undefined;
+		return {
+			start: { x: range.start.column, y: range.start.row },
+			end: { x: range.end.column, y: range.end.row },
+		};
+	}
+
+	/**
+	 * Clear the current selection. See {@link Terminal.clearSelection}.
+	 */
+	clearSelection(): void {
+		this.aceRenderer?.clearSelection();
+	}
+
+	/**
+	 * Select `length` cells starting at `column` on the viewport-relative
+	 * `row`. See {@link Terminal.select}.
+	 *
+	 * The viewport row is converted to an absolute Ace document row by
+	 * adding the current `viewportY` (the absolute index of the topmost
+	 * visible row). The selection runs from `column` to `column + length`
+	 * on that single row, matching xterm's single-row `select`.
+	 */
+	select(column: number, row: number, length: number): void {
+		if (!this.aceRenderer) return;
+		const absRow = this.scrollBuffer.viewportY + row;
+		this.aceRenderer.setSelectionRange(absRow, column, absRow, column + length);
+	}
+
+	/**
+	 * Select the entire buffer. See {@link Terminal.selectAll}.
+	 */
+	selectAll(): void {
+		this.aceRenderer?.selectAll();
+	}
+
+	/**
+	 * Select absolute buffer rows `start`..`end` inclusive. See
+	 * {@link Terminal.selectLines}. The end row is selected in full by
+	 * extending the selection to the start of the row after `end`.
+	 */
+	selectLines(start: number, end: number): void {
+		if (!this.aceRenderer) return;
+		const lo = Math.min(start, end);
+		const hi = Math.max(start, end);
+		// Extend to the start of the next row so the final row is fully
+		// covered, clamped to the document end.
+		const docLen = this.aceRenderer.getDocumentLength();
+		const endRow = Math.min(hi + 1, docLen - 1);
+		const endColumn = endRow > hi ? 0 : Number.MAX_SAFE_INTEGER;
+		this.aceRenderer.setSelectionRange(lo, 0, endRow, endColumn);
+	}
+
+	/**
+	 * Subscribe to selection-change events. See
+	 * {@link Terminal.onSelectionChange}.
+	 *
+	 * The Ace selection emitter only exists once `open()` has attached a
+	 * renderer. Subscriptions registered before `open()` are buffered and
+	 * wired when the renderer is created; those registered after are wired
+	 * immediately. `dispose()` removes the listener (and prevents a buffered
+	 * subscription from being wired later).
+	 */
+	onSelectionChange(callback: () => void): Disposable {
+		const entry: { callback: () => void; unsubscribe: (() => void) | null } = {
+			callback,
+			unsubscribe: null,
+		};
+		this.selectionSubscriptions.push(entry);
+		if (this.aceRenderer) {
+			entry.unsubscribe = this.aceRenderer.onSelectionChange(callback);
+		}
+		return {
+			dispose: () => {
+				entry.unsubscribe?.();
+				entry.unsubscribe = null;
+				const idx = this.selectionSubscriptions.indexOf(entry);
+				if (idx !== -1) this.selectionSubscriptions.splice(idx, 1);
+			},
+		};
+	}
+
 	dispose(): void {
+		// Tear down any live selection-change listeners before destroying the
+		// renderer they're attached to.
+		for (const entry of this.selectionSubscriptions) {
+			entry.unsubscribe?.();
+			entry.unsubscribe = null;
+		}
+		this.selectionSubscriptions = [];
+
 		if (this.aceRenderer) {
 			this.aceRenderer.dispose();
 			this.aceRenderer = null;
