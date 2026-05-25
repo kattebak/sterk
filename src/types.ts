@@ -189,6 +189,68 @@ export interface Terminal {
 	onData(callback: (data: string) => void): Disposable;
 
 	/**
+	 * Register a callback invoked when the terminal is resized via
+	 * {@link Terminal.resize}. The callback receives the new grid size.
+	 *
+	 * Fires only when the dimensions actually change (no-op resizes to the
+	 * same cols/rows do not emit). Mirrors xterm.js `Terminal.onResize`.
+	 *
+	 * @param callback - Function receiving the new `{ cols, rows }`
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onResize(
+		callback: (size: { cols: number; rows: number }) => void,
+	): Disposable;
+
+	/**
+	 * Register a callback invoked when a line feed (LF, `0x0a`) is processed.
+	 * Mirrors xterm.js `Terminal.onLineFeed`.
+	 *
+	 * @param callback - Function invoked on each line feed
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onLineFeed(callback: () => void): Disposable;
+
+	/**
+	 * Register a callback invoked when a bell (BEL, `0x07`) is processed.
+	 * Mirrors xterm.js `Terminal.onBell`.
+	 *
+	 * @param callback - Function invoked on each bell
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onBell(callback: () => void): Disposable;
+
+	/**
+	 * Register a callback invoked when the viewport scroll position changes.
+	 * The callback receives the new top line (absolute row index of the
+	 * topmost visible row, i.e. `viewportY`). Mirrors xterm.js
+	 * `Terminal.onScroll`, which passes `ydisp`.
+	 *
+	 * @param callback - Function receiving the new top line
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onScroll(callback: (newPosition: number) => void): Disposable;
+
+	/**
+	 * Register a callback invoked when the cursor position changes.
+	 * Mirrors xterm.js `Terminal.onCursorMove`.
+	 *
+	 * @param callback - Function invoked on each cursor move
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onCursorMove(callback: () => void): Disposable;
+
+	/**
+	 * Register a callback invoked when the window/icon title changes via
+	 * OSC 0 (icon + window title) or OSC 2 (window title). The callback
+	 * receives the title string. Mirrors xterm.js `Terminal.onTitleChange`.
+	 *
+	 * @param callback - Function receiving the new title
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onTitleChange(callback: (title: string) => void): Disposable;
+
+	/**
 	 * Send input data to the terminal (for forwarding to the backend).
 	 * Most consumers will call this in response to keyboard/paste events.
 	 *
