@@ -31,10 +31,14 @@ import { applyTheme, clearTruecolorCache } from "./renderer/theme.js";
 import { builtinThemeToTheme, getBuiltinTheme } from "./themes/index.js";
 import type {
 	BufferNamespace,
+	CsiHandler,
+	DcsHandler,
 	Disposable,
+	EscHandler,
 	ITerminalAddon,
 	OscHandler,
 	Parser,
+	ParserHandlerIdentifier,
 	Terminal,
 	TerminalOptions,
 } from "./types.js";
@@ -48,6 +52,27 @@ class ParserImpl implements Parser {
 
 	registerOscHandler(id: number, handler: OscHandler): Disposable {
 		return this.vtParser.registerOscHandler(id, handler);
+	}
+
+	registerCsiHandler(
+		id: ParserHandlerIdentifier,
+		handler: CsiHandler,
+	): Disposable {
+		return this.vtParser.registerCsiHandler(id, handler);
+	}
+
+	registerEscHandler(
+		id: ParserHandlerIdentifier,
+		handler: EscHandler,
+	): Disposable {
+		return this.vtParser.registerEscHandler(id, handler);
+	}
+
+	registerDcsHandler(
+		id: ParserHandlerIdentifier,
+		handler: DcsHandler,
+	): Disposable {
+		return this.vtParser.registerDcsHandler(id, handler);
 	}
 }
 
