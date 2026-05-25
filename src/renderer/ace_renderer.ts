@@ -489,6 +489,52 @@ export class AceRenderer {
 	}
 
 	/**
+	 * Get the hidden `<textarea>` Ace uses to capture keyboard / IME input.
+	 * Backs `Terminal.textarea` (xterm.js parity).
+	 *
+	 * Resolved via Ace's public `textInput.getElement()` when available,
+	 * falling back to the `.ace_text-input` node Ace creates inside the
+	 * editor container. Returns `undefined` if neither is present (defensive
+	 * — under a real or happy-dom Ace, one of them always is).
+	 */
+	getTextarea(): HTMLTextAreaElement | undefined {
+		// biome-ignore lint/suspicious/noExplicitAny: Ace's textInput isn't in the public typings.
+		const textInput = (this.editor as any).textInput;
+		const el = textInput?.getElement?.();
+		if (el instanceof HTMLTextAreaElement) return el;
+		const node = this.editor.container.querySelector(".ace_text-input");
+		return node instanceof HTMLTextAreaElement ? node : undefined;
+	}
+
+	/**
+	 * Set the renderer line height as an absolute pixel value, derived from
+	 * the xterm.js `lineHeight` multiplier (`fontSize * lineHeight`). Backs
+	 * the `lineHeight` terminal option.
+	 *
+	 * Ace exposes `renderer.lineHeight` (used by cursor / scroll math and
+	 * surfaced through `getCellMetrics`). We also pin the rendered row CSS so
+	 * the painted rows match the metric Ace reports.
+	 */
+	setLineHeight(multiplier: number): void {
+		// biome-ignore lint/suspicious/noExplicitAny: lineHeight / $fontMetrics aren't in the public typings.
+		const renderer = this.editor.renderer as any;
+		const fontSize =
+			typeof renderer.$fontSize === "number"
+				? renderer.$fontSize
+				: this.editor.getFontSize
+					? Number.parseFloat(String(this.editor.getFontSize()))
+					: 0;
+		const base = Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 12;
+		const px = Math.round(base * multiplier);
+		if (px <= 0) return;
+		renderer.lineHeight = px;
+		// Pin the rendered text-layer row height so painted rows match the
+		// metric Ace now reports (cursor / scroll use `lineHeight`).
+		this.viewportDiv.style.setProperty("--sterk-line-height", `${px}px`);
+		this.editor.resize(true);
+	}
+
+	/**
 	 * Focus the underlying Ace editor (moves keyboard focus to its hidden
 	 * textarea). Passthrough for `Terminal.focus()`.
 	 */
