@@ -621,7 +621,142 @@ export interface Parser {
 	 * @returns Disposable handle to unregister the handler
 	 */
 	registerOscHandler(id: number, handler: OscHandler): Disposable;
+
+	/**
+	 * Register a handler for a CSI (Control Sequence Introducer) sequence,
+	 * matched by its prefix, intermediate bytes and final byte. Mirrors
+	 * xterm.js `IParser.registerCsiHandler`.
+	 *
+	 * The handler receives the parsed numeric parameters. Sub-parameters
+	 * (introduced by a colon, e.g. `38:2::r:g:b`) are delivered as a nested
+	 * `number[]`; plain single-valued parameters are delivered as a `number`.
+	 *
+	 * Handlers for the same identifier are invoked in **reverse** registration
+	 * order (last registered runs first), matching xterm.js. If a handler
+	 * returns `true` the sequence is considered consumed and neither the
+	 * remaining custom handlers nor sterk's built-in default processing run.
+	 * If every handler returns `false` (or `undefined`), the sequence falls
+	 * through to sterk's default processing.
+	 *
+	 * Async handlers (returning a `Promise<boolean>`) are accepted for API
+	 * compatibility with xterm.js, but sterk's parser is synchronous: a
+	 * pending promise is treated as `false` (fall through) for the current
+	 * dispatch and the resolution is awaited best-effort without blocking the
+	 * parser. Prefer synchronous handlers.
+	 *
+	 * Example: intercept CSI `n` (Device Status Report):
+	 * ```
+	 * term.parser.registerCsiHandler({ final: "n" }, (params) => {
+	 *   // params: (number | number[])[]
+	 *   return true; // consume; skip default handling
+	 * });
+	 * ```
+	 *
+	 * @param id - Sequence identifier (prefix, intermediates, final byte)
+	 * @param handler - Callback invoked with parsed params
+	 * @returns Disposable handle to unregister the handler
+	 */
+	registerCsiHandler(
+		id: ParserHandlerIdentifier,
+		handler: CsiHandler,
+	): Disposable;
+
+	/**
+	 * Register a handler for an ESC sequence, matched by its intermediate
+	 * bytes and final byte. Mirrors xterm.js `IParser.registerEscHandler`.
+	 *
+	 * Handlers for the same identifier are invoked in reverse registration
+	 * order; returning `true` consumes the sequence and suppresses sterk's
+	 * default processing. Async returns are accepted but treated as `false`
+	 * for the current dispatch (see {@link Parser.registerCsiHandler}).
+	 *
+	 * Note: the `prefix` field of the identifier is ignored for ESC handlers
+	 * (ESC sequences have no private-marker prefix).
+	 *
+	 * @param id - Sequence identifier (intermediates, final byte)
+	 * @param handler - Callback invoked when the ESC sequence is dispatched
+	 * @returns Disposable handle to unregister the handler
+	 */
+	registerEscHandler(
+		id: ParserHandlerIdentifier,
+		handler: EscHandler,
+	): Disposable;
+
+	/**
+	 * Register a handler for a DCS (Device Control String) sequence, matched
+	 * by prefix, intermediate bytes and final byte. Mirrors xterm.js
+	 * `IParser.registerDcsHandler`.
+	 *
+	 * LIMITATION: sterk's parser does not currently assemble the DCS payload
+	 * (the hook/put/unhook passthrough lifecycle is stubbed). DCS handlers are
+	 * therefore registered and dispatched on the DCS **final byte** with the
+	 * parsed params and an empty payload string. The handler's boolean return
+	 * is honoured (true consumes the sequence). Full payload assembly is
+	 * tracked for a follow-up; do not rely on receiving DCS data yet.
+	 *
+	 * @param id - Sequence identifier (prefix, intermediates, final byte)
+	 * @param handler - Callback invoked when the DCS sequence is dispatched
+	 * @returns Disposable handle to unregister the handler
+	 */
+	registerDcsHandler(
+		id: ParserHandlerIdentifier,
+		handler: DcsHandler,
+	): Disposable;
 }
+
+/**
+ * Identifies a CSI / ESC / DCS sequence for handler registration, matching
+ * xterm.js `IFunctionIdentifier`.
+ *
+ * Bytes are given as single-character strings (e.g. `"?"`, `"m"`). `prefix`
+ * is a single private-marker byte in the range `0x3c`–`0x3f` (`<=>?`).
+ * `intermediates` are bytes in the range `0x20`–`0x2f`. `final` is the final
+ * byte in the range `0x40`–`0x7e` (CSI/DCS) or `0x30`–`0x7e` (ESC).
+ */
+export interface ParserHandlerIdentifier {
+	/** Optional single-character private-marker prefix (`<`, `=`, `>`, `?`). */
+	prefix?: string;
+	/** Optional intermediate bytes as a string (e.g. `" "`, `"$"`). */
+	intermediates?: string;
+	/** Required final byte as a single-character string. */
+	final: string;
+}
+
+/**
+ * Callback invoked when a matching CSI sequence is dispatched.
+ *
+ * @param params - Parsed parameters. A plain parameter is a `number`; a
+ *   parameter carrying colon-separated sub-parameters is a `number[]`.
+ * @returns `true` to consume the sequence (suppress default processing),
+ *   `false`/`undefined` to fall through. A `Promise` is accepted for xterm
+ *   compatibility but treated as `false` for the current dispatch.
+ */
+export type CsiHandler = (
+	params: (number | number[])[],
+) => boolean | Promise<boolean>;
+
+/**
+ * Callback invoked when a matching ESC sequence is dispatched.
+ *
+ * @returns `true` to consume the sequence, `false`/`undefined` to fall
+ *   through. A `Promise` is accepted but treated as `false` for the current
+ *   dispatch (see {@link CsiHandler}).
+ */
+export type EscHandler = () => boolean | Promise<boolean>;
+
+/**
+ * Callback invoked when a matching DCS sequence is dispatched.
+ *
+ * @param data - The DCS payload. Currently always an empty string — see the
+ *   limitation note on {@link Parser.registerDcsHandler}.
+ * @param params - Parsed parameters (see {@link CsiHandler}).
+ * @returns `true` to consume the sequence, `false`/`undefined` to fall
+ *   through. A `Promise` is accepted but treated as `false`.
+ */
+export type DcsHandler = (
+	data: string,
+	params: (number | number[])[],
+) => boolean | Promise<boolean>;
 
 /**
  * Callback invoked when an OSC sequence is parsed.
