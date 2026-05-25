@@ -153,16 +153,16 @@ class BufferCellImpl implements BufferCell {
 	}
 
 	// Foreground color accessors
-	isFgDefault(): boolean {
-		return this.cell.attrs.fgMode === 0;
+	isFgDefault(): number {
+		return this.cell.attrs.fgMode === 0 ? 1 : 0;
 	}
 
-	isFgPalette(): boolean {
-		return this.cell.attrs.fgMode === 1;
+	isFgPalette(): number {
+		return this.cell.attrs.fgMode === 1 ? 1 : 0;
 	}
 
-	isFgRGB(): boolean {
-		return this.cell.attrs.fgMode === 2;
+	isFgRGB(): number {
+		return this.cell.attrs.fgMode === 2 ? 1 : 0;
 	}
 
 	getFgColor(): number {
@@ -178,16 +178,16 @@ class BufferCellImpl implements BufferCell {
 	}
 
 	// Background color accessors
-	isBgDefault(): boolean {
-		return this.cell.attrs.bgMode === 0;
+	isBgDefault(): number {
+		return this.cell.attrs.bgMode === 0 ? 1 : 0;
 	}
 
-	isBgPalette(): boolean {
-		return this.cell.attrs.bgMode === 1;
+	isBgPalette(): number {
+		return this.cell.attrs.bgMode === 1 ? 1 : 0;
 	}
 
-	isBgRGB(): boolean {
-		return this.cell.attrs.bgMode === 2;
+	isBgRGB(): number {
+		return this.cell.attrs.bgMode === 2 ? 1 : 0;
 	}
 
 	getBgColor(): number {
@@ -203,24 +203,24 @@ class BufferCellImpl implements BufferCell {
 	}
 
 	// Text style accessors
-	isBold(): boolean {
-		return this.cell.attrs.bold;
+	isBold(): number {
+		return this.cell.attrs.bold ? 1 : 0;
 	}
 
-	isItalic(): boolean {
-		return this.cell.attrs.italic;
+	isItalic(): number {
+		return this.cell.attrs.italic ? 1 : 0;
 	}
 
-	isUnderline(): boolean {
-		return this.cell.attrs.underline;
+	isUnderline(): number {
+		return this.cell.attrs.underline ? 1 : 0;
 	}
 
-	isInverse(): boolean {
-		return this.cell.attrs.inverse;
+	isInverse(): number {
+		return this.cell.attrs.inverse ? 1 : 0;
 	}
 
-	isDim(): boolean {
-		return this.cell.attrs.dim;
+	isDim(): number {
+		return this.cell.attrs.dim ? 1 : 0;
 	}
 }
 
@@ -348,12 +348,12 @@ export class ScrollBuffer implements Buffer {
 		return Math.max(0, this.lines.length - this.rows);
 	}
 
-	getLine(y: number): BufferLine | null {
+	getLine(y: number): BufferLine | undefined {
 		if (y < 0 || y >= this.lines.length) {
-			return null;
+			return undefined;
 		}
 		const line = this.lines[y];
-		return line ? new BufferLineImpl(line) : null;
+		return line ? new BufferLineImpl(line) : undefined;
 	}
 
 	getNullCell(): BufferCell {

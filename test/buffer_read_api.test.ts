@@ -95,13 +95,13 @@ describe("buffer read-API parity (xterm.js)", () => {
 			const cell = term.buffer.active.getNullCell();
 			expect(cell.getChars()).toBe(" ");
 			expect(cell.getCode()).toBe(32);
-			expect(cell.isFgDefault()).toBe(true);
-			expect(cell.isBgDefault()).toBe(true);
-			expect(cell.isBold()).toBe(false);
-			expect(cell.isItalic()).toBe(false);
-			expect(cell.isUnderline()).toBe(false);
-			expect(cell.isInverse()).toBe(false);
-			expect(cell.isDim()).toBe(false);
+			expect(cell.isFgDefault()).toBe(1);
+			expect(cell.isBgDefault()).toBe(1);
+			expect(cell.isBold()).toBe(0);
+			expect(cell.isItalic()).toBe(0);
+			expect(cell.isUnderline()).toBe(0);
+			expect(cell.isInverse()).toBe(0);
+			expect(cell.isDim()).toBe(0);
 			term.dispose();
 		});
 

@@ -127,8 +127,8 @@ describe("xterm API parity", () => {
 			term.write("A");
 			const cell = term.buffer.active.getLine(0)?.getCell(0);
 			expect(cell?.getChars()).toBe("A");
-			expect(cell?.isBold()).toBe(false);
-			expect(cell?.isFgDefault()).toBe(true);
+			expect(cell?.isBold()).toBe(0);
+			expect(cell?.isFgDefault()).toBe(1);
 			term.dispose();
 		});
 

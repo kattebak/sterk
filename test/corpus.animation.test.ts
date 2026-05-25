@@ -197,7 +197,7 @@ describe("Corpus in-place animation gate", () => {
 				expect(
 					glyphCell.dim,
 					`frame ${i}: spinner glyph carried dim from prior pulse`,
-				).toBe(false);
+				).toBe(0);
 				expect(
 					glyphCell.fg,
 					`frame ${i}: spinner glyph carried fg colour from prior pulse`,
@@ -224,11 +224,11 @@ describe("Corpus in-place animation gate", () => {
 				expect(wordCell.ch).toBe("T");
 				if (i % 2 === 1) {
 					// Odd frame: dim pulse.
-					expect(wordCell.dim, `frame ${i}: expected dim word`).toBe(true);
+					expect(wordCell.dim, `frame ${i}: expected dim word`).toBe(1);
 					expect(wordCell.fg).toBe("default");
 				} else {
 					// Even frame: 256-colour grey-ramp fg pulse, no dim.
-					expect(wordCell.dim, `frame ${i}: expected no dim`).toBe(false);
+					expect(wordCell.dim, `frame ${i}: expected no dim`).toBe(0);
 					expect(
 						wordCell.fg.startsWith("p"),
 						`frame ${i}: expected palette fg, got ${wordCell.fg}`,

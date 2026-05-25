@@ -617,9 +617,9 @@ export interface Buffer {
 	 * Get a specific line from the buffer by absolute row index.
 	 *
 	 * @param y - Absolute row index (0 to length-1)
-	 * @returns BufferLine if the row exists, null otherwise
+	 * @returns BufferLine if the row exists, undefined otherwise
 	 */
-	getLine(y: number): BufferLine | null;
+	getLine(y: number): BufferLine | undefined;
 
 	/**
 	 * Return a blank default cell (space glyph, default attributes,
@@ -691,19 +691,19 @@ export interface BufferCell {
 	// ── Foreground color ─────────────────────────────────────────────
 
 	/**
-	 * True if the foreground uses the default theme color.
+	 * `1` if the foreground uses the default theme color, `0` otherwise.
 	 */
-	isFgDefault(): boolean;
+	isFgDefault(): number;
 
 	/**
-	 * True if the foreground is a palette color (ANSI 0-255).
+	 * `1` if the foreground is a palette color (ANSI 0-255), `0` otherwise.
 	 */
-	isFgPalette(): boolean;
+	isFgPalette(): number;
 
 	/**
-	 * True if the foreground is an RGB color (24-bit true color).
+	 * `1` if the foreground is an RGB color (24-bit true color), `0` otherwise.
 	 */
-	isFgRGB(): boolean;
+	isFgRGB(): number;
 
 	/**
 	 * Get the foreground color value.
@@ -724,19 +724,19 @@ export interface BufferCell {
 	// ── Background color ─────────────────────────────────────────────
 
 	/**
-	 * True if the background uses the default theme color.
+	 * `1` if the background uses the default theme color, `0` otherwise.
 	 */
-	isBgDefault(): boolean;
+	isBgDefault(): number;
 
 	/**
-	 * True if the background is a palette color (ANSI 0-255).
+	 * `1` if the background is a palette color (ANSI 0-255), `0` otherwise.
 	 */
-	isBgPalette(): boolean;
+	isBgPalette(): number;
 
 	/**
-	 * True if the background is an RGB color (24-bit true color).
+	 * `1` if the background is an RGB color (24-bit true color), `0` otherwise.
 	 */
-	isBgRGB(): boolean;
+	isBgRGB(): number;
 
 	/**
 	 * Get the background color value.
@@ -757,31 +757,32 @@ export interface BufferCell {
 	// ── Text attributes ──────────────────────────────────────────────
 
 	/**
-	 * True if the cell has the bold attribute set (SGR 1).
+	 * `1` if the cell has the bold attribute set (SGR 1), `0` otherwise.
 	 */
-	isBold(): boolean;
+	isBold(): number;
 
 	/**
-	 * True if the cell has the italic attribute set (SGR 3).
+	 * `1` if the cell has the italic attribute set (SGR 3), `0` otherwise.
 	 */
-	isItalic(): boolean;
+	isItalic(): number;
 
 	/**
-	 * True if the cell has the underline attribute set (SGR 4).
+	 * `1` if the cell has the underline attribute set (SGR 4), `0` otherwise.
 	 */
-	isUnderline(): boolean;
+	isUnderline(): number;
 
 	/**
-	 * True if the cell has the inverse/reverse video attribute set (SGR 7).
-	 * When inverse is set, fg and bg colors are swapped when rendering.
+	 * `1` if the cell has the inverse/reverse video attribute set (SGR 7),
+	 * `0` otherwise. When inverse is set, fg and bg colors are swapped when
+	 * rendering.
 	 */
-	isInverse(): boolean;
+	isInverse(): number;
 
 	/**
-	 * True if the cell has the dim attribute set (SGR 2).
+	 * `1` if the cell has the dim attribute set (SGR 2), `0` otherwise.
 	 * Dim text is typically rendered at reduced opacity.
 	 */
-	isDim(): boolean;
+	isDim(): number;
 }
 
 // ── Parser & OSC Handlers ────────────────────────────────────────────

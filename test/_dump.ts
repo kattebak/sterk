@@ -29,11 +29,12 @@ export interface CellDump {
 	ch: string;
 	fg: string;
 	bg: string;
-	bold: boolean;
-	italic: boolean;
-	underline: boolean;
-	inverse: boolean;
-	dim: boolean;
+	/** xterm 1/0 contract: 1 = set, 0 = unset. */
+	bold: number;
+	italic: number;
+	underline: number;
+	inverse: number;
+	dim: number;
 }
 
 export interface TokenDump {
