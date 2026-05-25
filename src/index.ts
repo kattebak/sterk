@@ -19,6 +19,7 @@ export type {
 	BufferNamespace,
 	BuiltinTheme,
 	Disposable,
+	ITerminalAddon,
 	OscHandler,
 	Parser,
 	TerminalOptions,

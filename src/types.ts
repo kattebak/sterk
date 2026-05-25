@@ -143,6 +143,40 @@ export interface Terminal {
 	scrollToBottom(): void;
 
 	/**
+	 * Scroll the viewport to the top of the scrollback buffer.
+	 * Pins viewportY to 0. Mirrors xterm.js `Terminal.scrollToTop`.
+	 */
+	scrollToTop(): void;
+
+	/**
+	 * Scroll the viewport so that the given absolute buffer line is the
+	 * topmost visible row. The target is clamped to the valid scroll range.
+	 * Mirrors xterm.js `Terminal.scrollToLine`.
+	 *
+	 * @param line - Absolute row index to scroll to
+	 */
+	scrollToLine(line: number): void;
+
+	/**
+	 * Scroll the viewport by the given number of pages, where one page is a
+	 * single viewport height (`rows` lines). Positive values scroll down
+	 * (towards newer content), negative values scroll up (towards older
+	 * content). Mirrors xterm.js `Terminal.scrollPages`.
+	 *
+	 * @param pageCount - Number of pages to scroll (signed)
+	 */
+	scrollPages(pageCount: number): void;
+
+	/**
+	 * Load an addon into the terminal. Calls `addon.activate(this)` and
+	 * tracks the addon so it is disposed when the terminal is disposed.
+	 * Mirrors xterm.js `Terminal.loadAddon`.
+	 *
+	 * @param addon - The addon to load
+	 */
+	loadAddon(addon: ITerminalAddon): void;
+
+	/**
 	 * Force the renderer to repaint after any currently in-flight writes
 	 * have been applied to the document.
 	 *
@@ -366,6 +400,17 @@ export interface BufferNamespace {
 	 * behavior — used by full-screen apps like vim/less).
 	 */
 	readonly alternate: Buffer;
+
+	/**
+	 * Register a callback invoked when the active buffer switches between
+	 * the normal and alternate screens (e.g. entering/leaving vim/less via
+	 * DECSET 1047 / 1049). The callback receives the newly-active buffer.
+	 * Mirrors xterm.js `Terminal.buffer.onBufferChange`.
+	 *
+	 * @param callback - Function receiving the newly-active buffer
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onBufferChange(callback: (activeBuffer: Buffer) => void): Disposable;
 }
 
 /**
@@ -912,5 +957,31 @@ export interface BuiltinTheme {
  * Calling dispose() unregisters the handler.
  */
 export interface Disposable {
+	dispose(): void;
+}
+
+// ── Addons ───────────────────────────────────────────────────────────
+
+/**
+ * Terminal addon interface. Mirrors xterm.js `ITerminalAddon`.
+ *
+ * An addon is loaded via {@link Terminal.loadAddon}, at which point its
+ * `activate()` method is called with the terminal instance. The terminal
+ * tracks every loaded addon and calls each addon's `dispose()` when the
+ * terminal itself is disposed, so an addon need not be torn down manually.
+ */
+export interface ITerminalAddon {
+	/**
+	 * Called when the addon is loaded via {@link Terminal.loadAddon}.
+	 *
+	 * @param terminal - The terminal the addon was loaded into
+	 */
+	activate(terminal: Terminal): void;
+
+	/**
+	 * Release any resources the addon holds. Called automatically when the
+	 * host terminal is disposed, or directly by the consumer to unload the
+	 * addon early.
+	 */
 	dispose(): void;
 }

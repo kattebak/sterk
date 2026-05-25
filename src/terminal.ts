@@ -32,6 +32,7 @@ import { builtinThemeToTheme, getBuiltinTheme } from "./themes/index.js";
 import type {
 	BufferNamespace,
 	Disposable,
+	ITerminalAddon,
 	OscHandler,
 	Parser,
 	Terminal,
@@ -72,6 +73,10 @@ export class TerminalImpl implements Terminal {
 	// handler. See `handleDecPrivateMode` for the protocol wire-up.
 	private pendingMouseTracking: MouseTrackingMode = MouseTrackingMode.Off;
 	private pendingMouseEncoding: MouseEncoding = MouseEncoding.Default;
+
+	// Loaded addons, tracked so they can be disposed alongside the terminal
+	// (xterm.js `loadAddon` semantics).
+	private addons: ITerminalAddon[] = [];
 
 	constructor(options?: TerminalOptions) {
 		// Resolve the font option. The contract: bare `createTerminal()` must
@@ -339,6 +344,47 @@ export class TerminalImpl implements Terminal {
 	}
 
 	/**
+	 * Scroll the viewport to the top of the scrollback (viewportY → 0).
+	 * xterm.js `scrollToTop` parity.
+	 */
+	scrollToTop(): void {
+		this.scrollToLine(0);
+	}
+
+	/**
+	 * Scroll the viewport so `line` (an absolute buffer row index) is the
+	 * topmost visible row. The buffer clamps out-of-range targets to the
+	 * valid scroll window. xterm.js `scrollToLine` parity.
+	 */
+	scrollToLine(line: number): void {
+		const beforeViewportY = this.scrollBuffer.viewportY;
+		this.scrollBuffer.setViewportY(line);
+		if (this.aceRenderer) {
+			this.aceRenderer.scheduleUpdate();
+		}
+		this.emitScrollIfChanged(beforeViewportY);
+	}
+
+	/**
+	 * Scroll the viewport by `pageCount` viewport-heights. One page equals
+	 * `rows` lines; positive scrolls towards newer content, negative towards
+	 * older. Reuses the `scrollLines` plumbing. xterm.js `scrollPages` parity.
+	 */
+	scrollPages(pageCount: number): void {
+		this.scrollLines(pageCount * this.rows);
+	}
+
+	/**
+	 * Load an addon and activate it against this terminal. The addon is
+	 * tracked so its `dispose()` runs when the terminal is disposed.
+	 * xterm.js `loadAddon` parity.
+	 */
+	loadAddon(addon: ITerminalAddon): void {
+		this.addons.push(addon);
+		addon.activate(this);
+	}
+
+	/**
 	 * Force the renderer to repaint after any currently in-flight writes
 	 * have been applied to the document.
 	 *
@@ -602,6 +648,15 @@ export class TerminalImpl implements Terminal {
 	}
 
 	dispose(): void {
+		// Dispose loaded addons first so they can still reach into terminal
+		// internals during teardown. Each is disposed exactly once; guard so
+		// one throwing addon does not strand the rest or the terminal's own
+		// cleanup.
+		const addons = this.addons;
+		this.addons = [];
+		for (const addon of addons) {
+			addon.dispose();
+		}
 		if (this.aceRenderer) {
 			this.aceRenderer.dispose();
 			this.aceRenderer = null;
