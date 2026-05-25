@@ -256,6 +256,25 @@ class BufferLineImpl implements BufferLine {
 }
 
 /**
+ * A live anchor into the buffer for a registered marker.
+ *
+ * `absoluteRow` is in the buffer's ABSOLUTE coordinate space (the same
+ * space as `Buffer.length` / `getLine(y)` / `baseY`): row 0 is the oldest
+ * line currently retained, and the value moves DOWN (towards 0) relative to
+ * the live window as scrollback accrues and the window scrolls past it.
+ *
+ * The buffer mutates `absoluteRow` in lock-step with line shifts so the
+ * marker keeps pointing at the same logical line, and calls `onScrolledOut`
+ * exactly once when that line falls out of the retained buffer.
+ */
+export interface MarkerAnchor {
+	/** Current absolute buffer row index of the anchored line. */
+	absoluteRow: number;
+	/** Invoked once when the anchored line scrolls out of the buffer. */
+	onScrolledOut: () => void;
+}
+
+/**
  * Scrollback buffer implementation.
  * Uses a ring buffer to efficiently store terminal lines with scrollback.
  */
@@ -276,6 +295,19 @@ export class ScrollBuffer implements Buffer {
 	private _cursorX = 0;
 	/** Cursor Y position (row, relative to viewport) */
 	private _cursorY = 0;
+
+	/**
+	 * Live marker anchors. Each anchor pins itself to a buffer ABSOLUTE row
+	 * (i.e. `baseY`-based, the same coordinate space `Buffer.length` /
+	 * `getLine(y)` use). As lines shift out of the ring (oldest dropped when
+	 * capacity is hit, `_baseY` incremented), an anchor's absolute row stays
+	 * fixed while the live window moves past it; once the anchored row drops
+	 * below `_baseY` (scrolled out of the buffer entirely) the anchor is
+	 * pruned and notified so it can auto-dispose, matching xterm.js marker
+	 * semantics. Anchors are append-only registrations; pruning + explicit
+	 * dispose remove them.
+	 */
+	private markerAnchors: MarkerAnchor[] = [];
 
 	constructor(
 		cols: number,
@@ -431,6 +463,12 @@ export class ScrollBuffer implements Buffer {
 		if (this.lines.length >= this.maxLines) {
 			this.lines.shift();
 			this._baseY++;
+			// The absolute coordinate space is unchanged (getLine(y) still
+			// addresses the same logical rows), but the oldest retained row's
+			// absolute index is now `_baseY`. Any marker anchored BELOW that
+			// (its line was the one just dropped) has scrolled out of the
+			// buffer and must auto-dispose. Prune + notify those anchors.
+			this.pruneScrolledOutMarkers();
 		}
 
 		// Append the new line at the bottom
@@ -621,6 +659,14 @@ export class ScrollBuffer implements Buffer {
 		this._viewportY = 0;
 		this._cursorX = 0;
 		this._cursorY = 0;
+		// A clear wipes the lines the markers anchored to, so every marker has
+		// effectively scrolled out — notify and drop them all (xterm.js
+		// disposes markers when their line is gone).
+		if (this.markerAnchors.length > 0) {
+			const evicted = this.markerAnchors;
+			this.markerAnchors = [];
+			for (const anchor of evicted) anchor.onScrolledOut();
+		}
 	}
 
 	/**
@@ -651,6 +697,66 @@ export class ScrollBuffer implements Buffer {
 
 		// Update viewport
 		this.setViewportY(this._viewportY);
+	}
+
+	/**
+	 * Register a marker anchored at an absolute buffer row. Returns the live
+	 * {@link MarkerAnchor} (whose `absoluteRow` the buffer keeps current) so
+	 * the caller can read the marker's line and unregister it on dispose.
+	 *
+	 * The anchor's `absoluteRow` is clamped into the current valid range
+	 * (`baseY .. length-1`). `onScrolledOut` fires at most once, when the
+	 * anchored line is dropped from the ring.
+	 *
+	 * @internal
+	 */
+	registerMarkerAnchor(
+		absoluteRow: number,
+		onScrolledOut: () => void,
+	): MarkerAnchor {
+		const clamped = Math.max(
+			this._baseY,
+			Math.min(absoluteRow, this._baseY + this.lines.length - 1),
+		);
+		const anchor: MarkerAnchor = { absoluteRow: clamped, onScrolledOut };
+		this.markerAnchors.push(anchor);
+		return anchor;
+	}
+
+	/**
+	 * Unregister a marker anchor (explicit dispose). Idempotent — unknown
+	 * anchors are ignored.
+	 *
+	 * @internal
+	 */
+	unregisterMarkerAnchor(anchor: MarkerAnchor): void {
+		const idx = this.markerAnchors.indexOf(anchor);
+		if (idx !== -1) this.markerAnchors.splice(idx, 1);
+	}
+
+	/**
+	 * Drop and notify any marker anchors whose line has fallen out of the
+	 * retained buffer (absolute row now below `_baseY`). Called after the
+	 * ring drops its oldest line.
+	 */
+	private pruneScrolledOutMarkers(): void {
+		if (this.markerAnchors.length === 0) return;
+		// Partition: keep anchors still in-buffer, collect the scrolled-out
+		// ones to notify AFTER mutating the array so a callback that re-enters
+		// (e.g. disposes another marker) sees a consistent registry.
+		const survivors: MarkerAnchor[] = [];
+		const evicted: MarkerAnchor[] = [];
+		for (const anchor of this.markerAnchors) {
+			if (anchor.absoluteRow < this._baseY) {
+				evicted.push(anchor);
+			} else {
+				survivors.push(anchor);
+			}
+		}
+		this.markerAnchors = survivors;
+		for (const anchor of evicted) {
+			anchor.onScrolledOut();
+		}
 	}
 
 	/**

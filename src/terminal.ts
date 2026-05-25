@@ -16,6 +16,11 @@ import {
 	getBuiltinFont,
 	injectFontFace,
 } from "./fonts/index.js";
+import {
+	DecorationImpl,
+	type DecorationRenderContext,
+	MarkerImpl,
+} from "./marker.js";
 import { applySgr } from "./parser/sgr.js";
 import { VtParser } from "./parser/vt_parser.js";
 import { AceRenderer } from "./renderer/ace_renderer.js";
@@ -35,6 +40,10 @@ import type {
 	DcsHandler,
 	Disposable,
 	EscHandler,
+	IDecoration,
+	IDecorationOptions,
+	ILinkProvider,
+	IMarker,
 	ITerminalAddon,
 	OscHandler,
 	Parser,
@@ -117,6 +126,17 @@ export class TerminalImpl implements Terminal {
 	// Loaded addons, tracked so they can be disposed alongside the terminal
 	// (xterm.js `loadAddon` semantics).
 	private addons: ITerminalAddon[] = [];
+
+	// Live decorations. Tracked so we can (a) re-position their overlays after
+	// each renderer flush / scroll, (b) supply a render context once `open()`
+	// wires a renderer, and (c) dispose them with the terminal. Markers are
+	// self-managing (the buffer auto-disposes them on scroll-out), so they are
+	// not tracked here beyond the decorations that reference them.
+	private decorations: DecorationImpl[] = [];
+	// External link providers buffered before `open()` so they survive into
+	// the LinkDetector once the renderer is attached, mirroring the
+	// selection-subscription buffering pattern above.
+	private pendingLinkProviders: ILinkProvider[] = [];
 
 	constructor(options?: TerminalOptions) {
 		// Resolve the font option. The contract: bare `createTerminal()` must
@@ -643,8 +663,11 @@ export class TerminalImpl implements Terminal {
 			this._options.fontFamily,
 		);
 
-		// Surface renderer repaints as onRender (xterm.js parity).
+		// Surface renderer repaints as onRender (xterm.js parity), and
+		// re-position any decoration overlays so they track their marker's row
+		// after the buffer→document sync that the flush just committed.
 		this.aceRenderer.onRender((range) => {
+			this.renderDecorations();
 			this.emitter.emit("render", range);
 		});
 
@@ -709,6 +732,20 @@ export class TerminalImpl implements Terminal {
 		this.linkDetector.onClick((link: Link) => {
 			this.emitter.emit("link-click", link);
 		});
+		// Flush any link providers registered before open() into the detector.
+		for (const provider of this.pendingLinkProviders) {
+			this.linkDetector.addProvider(provider);
+		}
+		this.pendingLinkProviders = [];
+
+		// Supply a render context to any decorations created in headless mode
+		// so their overlays can now be positioned against the live renderer.
+		if (this.decorations.length > 0) {
+			const ctx = this.makeDecorationRenderContext();
+			for (const decoration of this.decorations) {
+				decoration.setRenderContext(ctx);
+			}
+		}
 
 		// Wire any selection-change subscriptions buffered before open().
 		for (const entry of this.selectionSubscriptions) {
@@ -918,7 +955,102 @@ export class TerminalImpl implements Terminal {
 		};
 	}
 
+	// ── Markers / Decorations / Link providers (xterm.js-compatible) ──
+
+	/**
+	 * Register a marker anchored to the buffer line at the cursor row plus
+	 * `cursorYOffset`. See {@link Terminal.registerMarker}.
+	 *
+	 * The cursor's absolute row is `baseY + cursorY` (the buffer keeps the
+	 * live screen at the bottom; `cursorY` is screen-relative). We anchor at
+	 * that absolute row plus the signed offset and let the buffer track it as
+	 * scrollback accrues. Returns `undefined` if the resolved row is outside
+	 * the current buffer.
+	 */
+	registerMarker(cursorYOffset = 0): IMarker | undefined {
+		const buf = this.scrollBuffer;
+		const absoluteRow = buf.baseY + buf.cursorY + cursorYOffset;
+		if (absoluteRow < 0 || absoluteRow >= buf.length) {
+			return undefined;
+		}
+		return new MarkerImpl(buf, absoluteRow);
+	}
+
+	/**
+	 * Register a decoration attached to `options.marker`. See
+	 * {@link Terminal.registerDecoration} for the Ace-layer rendering note.
+	 *
+	 * Returns `undefined` if the marker is already disposed. The decoration is
+	 * tracked so its overlay is re-positioned after each render/scroll and so
+	 * it is disposed alongside the terminal.
+	 */
+	registerDecoration(options: IDecorationOptions): IDecoration | undefined {
+		if (options.marker.isDisposed) return undefined;
+		const ctx = this.aceRenderer ? this.makeDecorationRenderContext() : null;
+		const decoration = new DecorationImpl(options, ctx);
+		this.decorations.push(decoration);
+		decoration.onDispose(() => {
+			const idx = this.decorations.indexOf(decoration);
+			if (idx !== -1) this.decorations.splice(idx, 1);
+		});
+		return decoration;
+	}
+
+	/**
+	 * Build the render context decorations use to position their overlays.
+	 * Reads live renderer state each call so a decoration always positions
+	 * against the current cell metrics / scroll offset.
+	 */
+	private makeDecorationRenderContext(): DecorationRenderContext {
+		return {
+			getOverlayParent: () => this.aceRenderer?.getWrapper() ?? null,
+			getCellMetrics: () => this.getCellMetrics(),
+			getViewportTop: () => this.scrollBuffer.viewportY,
+		};
+	}
+
+	/**
+	 * Re-position all live decoration overlays. Called after each renderer
+	 * flush (onRender) and on scroll so overlays track their marker's row.
+	 */
+	private renderDecorations(): void {
+		if (this.decorations.length === 0) return;
+		for (const decoration of this.decorations) {
+			decoration.render();
+		}
+	}
+
+	/**
+	 * Register an external link provider. See
+	 * {@link Terminal.registerLinkProvider}. Buffered until `open()` if the
+	 * renderer (and thus the LinkDetector) isn't wired yet.
+	 */
+	registerLinkProvider(provider: ILinkProvider): Disposable {
+		let unregister: (() => void) | null = null;
+		if (this.linkDetector) {
+			unregister = this.linkDetector.addProvider(provider);
+		} else {
+			this.pendingLinkProviders.push(provider);
+		}
+		return {
+			dispose: () => {
+				unregister?.();
+				unregister = null;
+				const idx = this.pendingLinkProviders.indexOf(provider);
+				if (idx !== -1) this.pendingLinkProviders.splice(idx, 1);
+			},
+		};
+	}
+
 	dispose(): void {
+		// Dispose live decorations (removes overlays, fires their onDispose).
+		// Copy first: dispose() mutates this.decorations via its onDispose hook.
+		const decorations = [...this.decorations];
+		this.decorations = [];
+		for (const decoration of decorations) {
+			decoration.dispose();
+		}
+
 		// Tear down any live selection-change listeners before destroying the
 		// renderer they're attached to.
 		for (const entry of this.selectionSubscriptions) {
