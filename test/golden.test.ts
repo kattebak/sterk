@@ -121,11 +121,11 @@ describe("Golden tests", () => {
 
 			const attrs = getCellAttrs(term, 0, 0);
 			expect(attrs?.char).toBe("B");
-			expect(attrs?.bold).toBe(true);
+			expect(attrs?.bold).toBe(1);
 
 			// After reset
 			const afterReset = getCellAttrs(term, 4, 0);
-			expect(afterReset?.bold).toBe(false);
+			expect(afterReset?.bold).toBe(0);
 			term.dispose();
 		});
 
@@ -134,7 +134,7 @@ describe("Golden tests", () => {
 			term.write("\x1b[3mITALIC\x1b[0m");
 
 			const attrs = getCellAttrs(term, 0, 0);
-			expect(attrs?.italic).toBe(true);
+			expect(attrs?.italic).toBe(1);
 			term.dispose();
 		});
 
@@ -143,7 +143,7 @@ describe("Golden tests", () => {
 			term.write("\x1b[4mUNDERLINE\x1b[0m");
 
 			const attrs = getCellAttrs(term, 0, 0);
-			expect(attrs?.underline).toBe(true);
+			expect(attrs?.underline).toBe(1);
 			term.dispose();
 		});
 
@@ -152,7 +152,7 @@ describe("Golden tests", () => {
 			term.write("\x1b[7mINVERSE\x1b[0m");
 
 			const attrs = getCellAttrs(term, 0, 0);
-			expect(attrs?.inverse).toBe(true);
+			expect(attrs?.inverse).toBe(1);
 			term.dispose();
 		});
 
@@ -161,7 +161,7 @@ describe("Golden tests", () => {
 			term.write("\x1b[31mRED\x1b[0m");
 
 			const attrs = getCellAttrs(term, 0, 0);
-			expect(attrs?.fgDefault).toBe(false);
+			expect(attrs?.fgDefault).toBe(0);
 			expect(attrs?.fgColor).toBe(1); // ANSI red
 			term.dispose();
 		});
@@ -171,7 +171,7 @@ describe("Golden tests", () => {
 			term.write("\x1b[42mGREEN_BG\x1b[0m");
 
 			const attrs = getCellAttrs(term, 0, 0);
-			expect(attrs?.bgDefault).toBe(false);
+			expect(attrs?.bgDefault).toBe(0);
 			expect(attrs?.bgColor).toBe(2); // ANSI green
 			term.dispose();
 		});
@@ -208,9 +208,9 @@ describe("Golden tests", () => {
 			term.write("\x1b[1;3;4;31mCOMBO\x1b[0m");
 
 			const attrs = getCellAttrs(term, 0, 0);
-			expect(attrs?.bold).toBe(true);
-			expect(attrs?.italic).toBe(true);
-			expect(attrs?.underline).toBe(true);
+			expect(attrs?.bold).toBe(1);
+			expect(attrs?.italic).toBe(1);
+			expect(attrs?.underline).toBe(1);
 			expect(attrs?.fgColor).toBe(1); // red
 			term.dispose();
 		});
@@ -222,19 +222,19 @@ describe("Golden tests", () => {
 			);
 
 			const start = getCellAttrs(term, 0, 0);
-			expect(start?.bold).toBe(true);
-			expect(start?.italic).toBe(true);
-			expect(start?.underline).toBe(true);
+			expect(start?.bold).toBe(1);
+			expect(start?.italic).toBe(1);
+			expect(start?.underline).toBe(1);
 
 			const noBold = getCellAttrs(term, 5, 0);
-			expect(noBold?.bold).toBe(false);
-			expect(noBold?.italic).toBe(true);
+			expect(noBold?.bold).toBe(0);
+			expect(noBold?.italic).toBe(1);
 
 			const noItalic = getCellAttrs(term, 11, 0);
-			expect(noItalic?.italic).toBe(false);
+			expect(noItalic?.italic).toBe(0);
 
 			const noUnder = getCellAttrs(term, 19, 0);
-			expect(noUnder?.underline).toBe(false);
+			expect(noUnder?.underline).toBe(0);
 			term.dispose();
 		});
 	});

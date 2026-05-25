@@ -168,9 +168,9 @@ describe("@kattebak/sterk", () => {
 			expectTypeOf<Params>().toMatchTypeOf<[number, OscHandler]>();
 		});
 
-		it("Buffer.getLine returns BufferLine or null", () => {
+		it("Buffer.getLine returns BufferLine or undefined", () => {
 			type GetLineReturn = ReturnType<Buffer["getLine"]>;
-			expectTypeOf<GetLineReturn>().toEqualTypeOf<BufferLine | null>();
+			expectTypeOf<GetLineReturn>().toEqualTypeOf<BufferLine | undefined>();
 		});
 
 		it("BufferCell color accessors return numbers", () => {
@@ -178,11 +178,11 @@ describe("@kattebak/sterk", () => {
 			expectTypeOf<BufferCell["getBgColor"]>().returns.toBeNumber();
 		});
 
-		it("BufferCell style accessors return booleans", () => {
-			expectTypeOf<BufferCell["isBold"]>().returns.toBeBoolean();
-			expectTypeOf<BufferCell["isItalic"]>().returns.toBeBoolean();
-			expectTypeOf<BufferCell["isUnderline"]>().returns.toBeBoolean();
-			expectTypeOf<BufferCell["isInverse"]>().returns.toBeBoolean();
+		it("BufferCell style accessors return numbers (xterm 1/0 contract)", () => {
+			expectTypeOf<BufferCell["isBold"]>().returns.toBeNumber();
+			expectTypeOf<BufferCell["isItalic"]>().returns.toBeNumber();
+			expectTypeOf<BufferCell["isUnderline"]>().returns.toBeNumber();
+			expectTypeOf<BufferCell["isInverse"]>().returns.toBeNumber();
 		});
 	});
 });
