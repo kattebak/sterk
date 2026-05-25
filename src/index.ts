@@ -18,9 +18,13 @@ export type {
 	BufferLine,
 	BufferNamespace,
 	BuiltinTheme,
+	CsiHandler,
+	DcsHandler,
 	Disposable,
+	EscHandler,
 	OscHandler,
 	Parser,
+	ParserHandlerIdentifier,
 	TerminalOptions,
 	Theme,
 } from "./types.js";
