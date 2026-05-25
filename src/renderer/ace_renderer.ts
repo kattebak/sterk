@@ -504,6 +504,97 @@ export class AceRenderer {
 		this.editor.blur();
 	}
 
+	// ── Selection passthroughs ───────────────────────────────────────
+	//
+	// These map the xterm.js `Terminal` selection surface onto Ace's
+	// `editor.selection`. The renderer keeps Ace document rows 1:1 with
+	// buffer ABSOLUTE rows (see `syncBufferToDocument`), so callers that
+	// already hold absolute-row Ace coordinates pass them through here
+	// unchanged. Viewport-relative ↔ absolute translation is the
+	// terminal's responsibility (it owns the buffer offsets).
+
+	/**
+	 * True when the editor has a non-empty selection.
+	 */
+	hasSelection(): boolean {
+		return !this.editor.selection.isEmpty();
+	}
+
+	/**
+	 * The currently selected text (empty string when nothing is selected).
+	 */
+	getSelectedText(): string {
+		return this.editor.getSelectedText();
+	}
+
+	/**
+	 * The current selection range in Ace document coordinates
+	 * (`{ start: { row, column }, end: { row, column } }`), or `undefined`
+	 * when the selection is empty. Ace rows equal buffer absolute rows.
+	 */
+	getSelectionRange():
+		| {
+				start: { row: number; column: number };
+				end: { row: number; column: number };
+		  }
+		| undefined {
+		if (this.editor.selection.isEmpty()) return undefined;
+		const range = this.editor.selection.getRange();
+		return {
+			start: { row: range.start.row, column: range.start.column },
+			end: { row: range.end.row, column: range.end.column },
+		};
+	}
+
+	/**
+	 * Clear the current selection (collapses to the cursor).
+	 */
+	clearSelection(): void {
+		this.editor.clearSelection();
+	}
+
+	/**
+	 * Select all document content.
+	 */
+	selectAll(): void {
+		this.editor.selectAll();
+	}
+
+	/**
+	 * Set the selection to the given Ace document range (absolute rows).
+	 * Coordinates are clamped to the document by Ace.
+	 */
+	setSelectionRange(
+		startRow: number,
+		startColumn: number,
+		endRow: number,
+		endColumn: number,
+	): void {
+		this.editor.selection.setSelectionRange({
+			start: { row: startRow, column: startColumn },
+			end: { row: endRow, column: endColumn },
+		});
+	}
+
+	/**
+	 * Subscribe to Ace selection-change events. Returns an unsubscribe fn.
+	 */
+	onSelectionChange(callback: () => void): () => void {
+		const wrapper = () => callback();
+		this.editor.selection.on("changeSelection", wrapper);
+		return () => {
+			this.editor.selection.off("changeSelection", wrapper);
+		};
+	}
+
+	/**
+	 * The number of document lines (== buffer length). Used by the terminal
+	 * to clamp selection rows when the renderer is the source of truth.
+	 */
+	getDocumentLength(): number {
+		return this.session.getDocument().getLength();
+	}
+
 	/**
 	 * Handle buffer switch (normal ↔ alternate screen)
 	 * Called when terminal switches between buffers

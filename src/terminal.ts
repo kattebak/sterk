@@ -31,9 +31,14 @@ import { applyTheme, clearTruecolorCache } from "./renderer/theme.js";
 import { builtinThemeToTheme, getBuiltinTheme } from "./themes/index.js";
 import type {
 	BufferNamespace,
+	CsiHandler,
+	DcsHandler,
 	Disposable,
+	EscHandler,
+	ITerminalAddon,
 	OscHandler,
 	Parser,
+	ParserHandlerIdentifier,
 	Terminal,
 	TerminalOptions,
 } from "./types.js";
@@ -47,6 +52,27 @@ class ParserImpl implements Parser {
 
 	registerOscHandler(id: number, handler: OscHandler): Disposable {
 		return this.vtParser.registerOscHandler(id, handler);
+	}
+
+	registerCsiHandler(
+		id: ParserHandlerIdentifier,
+		handler: CsiHandler,
+	): Disposable {
+		return this.vtParser.registerCsiHandler(id, handler);
+	}
+
+	registerEscHandler(
+		id: ParserHandlerIdentifier,
+		handler: EscHandler,
+	): Disposable {
+		return this.vtParser.registerEscHandler(id, handler);
+	}
+
+	registerDcsHandler(
+		id: ParserHandlerIdentifier,
+		handler: DcsHandler,
+	): Disposable {
+		return this.vtParser.registerDcsHandler(id, handler);
 	}
 }
 
@@ -80,6 +106,17 @@ export class TerminalImpl implements Terminal {
 	private pendingCustomKeyHandler: ((e: KeyboardEvent) => boolean) | null =
 		null;
 	private pendingCustomWheelHandler: ((e: WheelEvent) => boolean) | null = null;
+	// Selection-change subscriptions. Buffered so callers can subscribe in
+	// headless mode (before `open()`); each entry is wired to the Ace
+	// selection emitter when the renderer is created, and torn down on
+	// `dispose()` or when the returned Disposable is disposed.
+	private selectionSubscriptions: Array<{
+		callback: () => void;
+		unsubscribe: (() => void) | null;
+	}> = [];
+	// Loaded addons, tracked so they can be disposed alongside the terminal
+	// (xterm.js `loadAddon` semantics).
+	private addons: ITerminalAddon[] = [];
 
 	constructor(options?: TerminalOptions) {
 		// Resolve the font option. The contract: bare `createTerminal()` must
@@ -364,6 +401,47 @@ export class TerminalImpl implements Terminal {
 	}
 
 	/**
+	 * Scroll the viewport to the top of the scrollback (viewportY → 0).
+	 * xterm.js `scrollToTop` parity.
+	 */
+	scrollToTop(): void {
+		this.scrollToLine(0);
+	}
+
+	/**
+	 * Scroll the viewport so `line` (an absolute buffer row index) is the
+	 * topmost visible row. The buffer clamps out-of-range targets to the
+	 * valid scroll window. xterm.js `scrollToLine` parity.
+	 */
+	scrollToLine(line: number): void {
+		const beforeViewportY = this.scrollBuffer.viewportY;
+		this.scrollBuffer.setViewportY(line);
+		if (this.aceRenderer) {
+			this.aceRenderer.scheduleUpdate();
+		}
+		this.emitScrollIfChanged(beforeViewportY);
+	}
+
+	/**
+	 * Scroll the viewport by `pageCount` viewport-heights. One page equals
+	 * `rows` lines; positive scrolls towards newer content, negative towards
+	 * older. Reuses the `scrollLines` plumbing. xterm.js `scrollPages` parity.
+	 */
+	scrollPages(pageCount: number): void {
+		this.scrollLines(pageCount * this.rows);
+	}
+
+	/**
+	 * Load an addon and activate it against this terminal. The addon is
+	 * tracked so its `dispose()` runs when the terminal is disposed.
+	 * xterm.js `loadAddon` parity.
+	 */
+	loadAddon(addon: ITerminalAddon): void {
+		this.addons.push(addon);
+		addon.activate(this);
+	}
+
+	/**
 	 * Force the renderer to repaint after any currently in-flight writes
 	 * have been applied to the document.
 	 *
@@ -632,6 +710,13 @@ export class TerminalImpl implements Terminal {
 			this.emitter.emit("link-click", link);
 		});
 
+		// Wire any selection-change subscriptions buffered before open().
+		for (const entry of this.selectionSubscriptions) {
+			if (!entry.unsubscribe) {
+				entry.unsubscribe = this.aceRenderer.onSelectionChange(entry.callback);
+			}
+		}
+
 		// Initial render
 		this.aceRenderer.scheduleUpdate();
 	}
@@ -716,7 +801,141 @@ export class TerminalImpl implements Terminal {
 		}
 	}
 
+	// ── Selection API (xterm.js-compatible) ──────────────────────────
+	//
+	// Delegates to Ace's selection model via the renderer. Ace document
+	// rows are kept 1:1 with buffer ABSOLUTE rows (see AceRenderer
+	// `syncBufferToDocument`), so:
+	//   - viewport-relative rows (xterm `select`) → add `viewportY`
+	//   - absolute rows (xterm `selectLines`, `getSelectionPosition`) pass
+	//     through unchanged.
+	// All methods are no-ops in headless mode (no renderer attached).
+
+	/**
+	 * Whether there is a non-empty selection. See {@link Terminal.hasSelection}.
+	 */
+	hasSelection(): boolean {
+		return this.aceRenderer?.hasSelection() ?? false;
+	}
+
+	/**
+	 * The currently selected text. See {@link Terminal.getSelection}.
+	 */
+	getSelection(): string {
+		return this.aceRenderer?.getSelectedText() ?? "";
+	}
+
+	/**
+	 * The selection position in absolute buffer coordinates, or undefined
+	 * when there is no selection. See {@link Terminal.getSelectionPosition}.
+	 *
+	 * Ace document rows map 1:1 onto absolute buffer rows, so the Ace range
+	 * rows are returned directly as `y`; columns map directly to `x`.
+	 */
+	getSelectionPosition():
+		| { start: { x: number; y: number }; end: { x: number; y: number } }
+		| undefined {
+		const range = this.aceRenderer?.getSelectionRange();
+		if (!range) return undefined;
+		return {
+			start: { x: range.start.column, y: range.start.row },
+			end: { x: range.end.column, y: range.end.row },
+		};
+	}
+
+	/**
+	 * Clear the current selection. See {@link Terminal.clearSelection}.
+	 */
+	clearSelection(): void {
+		this.aceRenderer?.clearSelection();
+	}
+
+	/**
+	 * Select `length` cells starting at `column` on the viewport-relative
+	 * `row`. See {@link Terminal.select}.
+	 *
+	 * The viewport row is converted to an absolute Ace document row by
+	 * adding the current `viewportY` (the absolute index of the topmost
+	 * visible row). The selection runs from `column` to `column + length`
+	 * on that single row, matching xterm's single-row `select`.
+	 */
+	select(column: number, row: number, length: number): void {
+		if (!this.aceRenderer) return;
+		const absRow = this.scrollBuffer.viewportY + row;
+		this.aceRenderer.setSelectionRange(absRow, column, absRow, column + length);
+	}
+
+	/**
+	 * Select the entire buffer. See {@link Terminal.selectAll}.
+	 */
+	selectAll(): void {
+		this.aceRenderer?.selectAll();
+	}
+
+	/**
+	 * Select absolute buffer rows `start`..`end` inclusive. See
+	 * {@link Terminal.selectLines}. The end row is selected in full by
+	 * extending the selection to the start of the row after `end`.
+	 */
+	selectLines(start: number, end: number): void {
+		if (!this.aceRenderer) return;
+		const lo = Math.min(start, end);
+		const hi = Math.max(start, end);
+		// Extend to the start of the next row so the final row is fully
+		// covered, clamped to the document end.
+		const docLen = this.aceRenderer.getDocumentLength();
+		const endRow = Math.min(hi + 1, docLen - 1);
+		const endColumn = endRow > hi ? 0 : Number.MAX_SAFE_INTEGER;
+		this.aceRenderer.setSelectionRange(lo, 0, endRow, endColumn);
+	}
+
+	/**
+	 * Subscribe to selection-change events. See
+	 * {@link Terminal.onSelectionChange}.
+	 *
+	 * The Ace selection emitter only exists once `open()` has attached a
+	 * renderer. Subscriptions registered before `open()` are buffered and
+	 * wired when the renderer is created; those registered after are wired
+	 * immediately. `dispose()` removes the listener (and prevents a buffered
+	 * subscription from being wired later).
+	 */
+	onSelectionChange(callback: () => void): Disposable {
+		const entry: { callback: () => void; unsubscribe: (() => void) | null } = {
+			callback,
+			unsubscribe: null,
+		};
+		this.selectionSubscriptions.push(entry);
+		if (this.aceRenderer) {
+			entry.unsubscribe = this.aceRenderer.onSelectionChange(callback);
+		}
+		return {
+			dispose: () => {
+				entry.unsubscribe?.();
+				entry.unsubscribe = null;
+				const idx = this.selectionSubscriptions.indexOf(entry);
+				if (idx !== -1) this.selectionSubscriptions.splice(idx, 1);
+			},
+		};
+	}
+
 	dispose(): void {
+		// Tear down any live selection-change listeners before destroying the
+		// renderer they're attached to.
+		for (const entry of this.selectionSubscriptions) {
+			entry.unsubscribe?.();
+			entry.unsubscribe = null;
+		}
+		this.selectionSubscriptions = [];
+
+		// Dispose loaded addons first so they can still reach into terminal
+		// internals during teardown. Each is disposed exactly once; guard so
+		// one throwing addon does not strand the rest or the terminal's own
+		// cleanup.
+		const addons = this.addons;
+		this.addons = [];
+		for (const addon of addons) {
+			addon.dispose();
+		}
 		if (this.aceRenderer) {
 			this.aceRenderer.dispose();
 			this.aceRenderer = null;

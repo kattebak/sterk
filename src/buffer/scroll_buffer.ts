@@ -17,7 +17,9 @@ import type {
 	BufferCell,
 	BufferLine,
 	BufferNamespace,
+	Disposable,
 } from "../types.js";
+import { EventEmitter } from "../util/event_emitter.js";
 import { wcwidth } from "../util/wcwidth.js";
 
 /**
@@ -678,6 +680,7 @@ export class BufferNamespaceImpl implements BufferNamespace {
 	private alternateBuffer: ScrollBuffer;
 	private activeBuffer: ScrollBuffer;
 	private savedCursor: SavedCursor | null = null;
+	private emitter = new EventEmitter();
 
 	constructor(cols: number, rows: number, scrollback: number) {
 		// Normal buffer has scrollback
@@ -716,11 +719,30 @@ export class BufferNamespaceImpl implements BufferNamespace {
 	}
 
 	/**
+	 * Register a callback invoked when the active buffer switches between
+	 * the normal and alternate screens. The callback receives the
+	 * newly-active buffer. Mirrors xterm.js `buffer.onBufferChange`.
+	 */
+	onBufferChange(callback: (activeBuffer: Buffer) => void): Disposable {
+		const wrapper = (buffer: unknown) => {
+			callback(buffer as Buffer);
+		};
+		this.emitter.on("buffer-change", wrapper);
+		return {
+			dispose: () => {
+				this.emitter.off("buffer-change", wrapper);
+			},
+		};
+	}
+
+	/**
 	 * Switch to alternate screen buffer
 	 * @internal
 	 */
 	switchToAlternate(): void {
+		if (this.activeBuffer === this.alternateBuffer) return;
 		this.activeBuffer = this.alternateBuffer;
+		this.emitter.emit("buffer-change", this.activeBuffer);
 	}
 
 	/**
@@ -728,7 +750,9 @@ export class BufferNamespaceImpl implements BufferNamespace {
 	 * @internal
 	 */
 	switchToNormal(): void {
+		if (this.activeBuffer === this.normalBuffer) return;
 		this.activeBuffer = this.normalBuffer;
+		this.emitter.emit("buffer-change", this.activeBuffer);
 	}
 
 	/**

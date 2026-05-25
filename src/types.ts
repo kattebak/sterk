@@ -143,6 +143,40 @@ export interface Terminal {
 	scrollToBottom(): void;
 
 	/**
+	 * Scroll the viewport to the top of the scrollback buffer.
+	 * Pins viewportY to 0. Mirrors xterm.js `Terminal.scrollToTop`.
+	 */
+	scrollToTop(): void;
+
+	/**
+	 * Scroll the viewport so that the given absolute buffer line is the
+	 * topmost visible row. The target is clamped to the valid scroll range.
+	 * Mirrors xterm.js `Terminal.scrollToLine`.
+	 *
+	 * @param line - Absolute row index to scroll to
+	 */
+	scrollToLine(line: number): void;
+
+	/**
+	 * Scroll the viewport by the given number of pages, where one page is a
+	 * single viewport height (`rows` lines). Positive values scroll down
+	 * (towards newer content), negative values scroll up (towards older
+	 * content). Mirrors xterm.js `Terminal.scrollPages`.
+	 *
+	 * @param pageCount - Number of pages to scroll (signed)
+	 */
+	scrollPages(pageCount: number): void;
+
+	/**
+	 * Load an addon into the terminal. Calls `addon.activate(this)` and
+	 * tracks the addon so it is disposed when the terminal is disposed.
+	 * Mirrors xterm.js `Terminal.loadAddon`.
+	 *
+	 * @param addon - The addon to load
+	 */
+	loadAddon(addon: ITerminalAddon): void;
+
+	/**
 	 * Force the renderer to repaint after any currently in-flight writes
 	 * have been applied to the document.
 	 *
@@ -408,6 +442,88 @@ export interface Terminal {
 	 */
 	setFont?(fontId: string): void;
 
+	// ── Selection (xterm.js-compatible) ──────────────────────────────
+	//
+	// Sterk renders through Ace, so the selection surface delegates to
+	// Ace's selection model. These are additive and only do meaningful
+	// work once {@link Terminal.open} has attached a renderer; in headless
+	// mode they are safe no-ops (and `hasSelection`/`getSelection` report
+	// "no selection").
+
+	/**
+	 * Whether the terminal currently has a non-empty text selection.
+	 * Mirrors xterm.js `Terminal.hasSelection()`. Returns `false` in
+	 * headless mode (before {@link Terminal.open}).
+	 */
+	hasSelection?(): boolean;
+
+	/**
+	 * Get the selected text. Mirrors xterm.js `Terminal.getSelection()`.
+	 * Returns an empty string when nothing is selected or in headless mode.
+	 */
+	getSelection?(): string;
+
+	/**
+	 * Get the position of the current selection as buffer coordinates
+	 * (`{ start: { x, y }, end: { x, y } }`), or `undefined` when there is
+	 * no selection. Mirrors xterm.js `Terminal.getSelectionPosition()`
+	 * (which returns an `IBufferRange | undefined`).
+	 *
+	 * `x` is the 0-based column; `y` is the 0-based ABSOLUTE buffer row
+	 * (including scrollback), matching xterm's `IBufferRange`. Returns
+	 * `undefined` in headless mode.
+	 */
+	getSelectionPosition?():
+		| { start: { x: number; y: number }; end: { x: number; y: number } }
+		| undefined;
+
+	/**
+	 * Clear the current selection. Mirrors xterm.js
+	 * `Terminal.clearSelection()`. No-op in headless mode.
+	 */
+	clearSelection?(): void;
+
+	/**
+	 * Select `length` cells starting at the given column on the given
+	 * VIEWPORT row. Mirrors xterm.js `Terminal.select(column, row, length)`,
+	 * where `row` is relative to the top of the current viewport.
+	 *
+	 * The selection is mapped onto the underlying Ace document accounting
+	 * for the current scroll offset (`viewportY`). No-op in headless mode.
+	 *
+	 * @param column - 0-based start column
+	 * @param row - 0-based row relative to the viewport top
+	 * @param length - number of cells to select
+	 */
+	select?(column: number, row: number, length: number): void;
+
+	/**
+	 * Select the entire buffer (scrollback + screen). Mirrors xterm.js
+	 * `Terminal.selectAll()`. No-op in headless mode.
+	 */
+	selectAll?(): void;
+
+	/**
+	 * Select the lines between `start` and `end` (inclusive), addressed by
+	 * ABSOLUTE buffer row index (including scrollback). Mirrors xterm.js
+	 * `Terminal.selectLines(start, end)`. No-op in headless mode.
+	 *
+	 * @param start - 0-based absolute start row
+	 * @param end - 0-based absolute end row (inclusive)
+	 */
+	selectLines?(start: number, end: number): void;
+
+	/**
+	 * Register a callback invoked whenever the selection changes. Mirrors
+	 * xterm.js `Terminal.onSelectionChange`. The Disposable's `dispose()`
+	 * stops further delivery. In headless mode the subscription is inert
+	 * (the callback never fires) but `dispose()` is still safe to call.
+	 *
+	 * @param callback - Function invoked on each selection change
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onSelectionChange?(callback: () => void): Disposable;
+
 	/**
 	 * Clean up resources and detach event listeners.
 	 * The Terminal instance should not be used after calling dispose().
@@ -440,6 +556,17 @@ export interface BufferNamespace {
 	 * behavior — used by full-screen apps like vim/less).
 	 */
 	readonly alternate: Buffer;
+
+	/**
+	 * Register a callback invoked when the active buffer switches between
+	 * the normal and alternate screens (e.g. entering/leaving vim/less via
+	 * DECSET 1047 / 1049). The callback receives the newly-active buffer.
+	 * Mirrors xterm.js `Terminal.buffer.onBufferChange`.
+	 *
+	 * @param callback - Function receiving the newly-active buffer
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onBufferChange(callback: (activeBuffer: Buffer) => void): Disposable;
 }
 
 /**
@@ -695,7 +822,142 @@ export interface Parser {
 	 * @returns Disposable handle to unregister the handler
 	 */
 	registerOscHandler(id: number, handler: OscHandler): Disposable;
+
+	/**
+	 * Register a handler for a CSI (Control Sequence Introducer) sequence,
+	 * matched by its prefix, intermediate bytes and final byte. Mirrors
+	 * xterm.js `IParser.registerCsiHandler`.
+	 *
+	 * The handler receives the parsed numeric parameters. Sub-parameters
+	 * (introduced by a colon, e.g. `38:2::r:g:b`) are delivered as a nested
+	 * `number[]`; plain single-valued parameters are delivered as a `number`.
+	 *
+	 * Handlers for the same identifier are invoked in **reverse** registration
+	 * order (last registered runs first), matching xterm.js. If a handler
+	 * returns `true` the sequence is considered consumed and neither the
+	 * remaining custom handlers nor sterk's built-in default processing run.
+	 * If every handler returns `false` (or `undefined`), the sequence falls
+	 * through to sterk's default processing.
+	 *
+	 * Async handlers (returning a `Promise<boolean>`) are accepted for API
+	 * compatibility with xterm.js, but sterk's parser is synchronous: a
+	 * pending promise is treated as `false` (fall through) for the current
+	 * dispatch and the resolution is awaited best-effort without blocking the
+	 * parser. Prefer synchronous handlers.
+	 *
+	 * Example: intercept CSI `n` (Device Status Report):
+	 * ```
+	 * term.parser.registerCsiHandler({ final: "n" }, (params) => {
+	 *   // params: (number | number[])[]
+	 *   return true; // consume; skip default handling
+	 * });
+	 * ```
+	 *
+	 * @param id - Sequence identifier (prefix, intermediates, final byte)
+	 * @param handler - Callback invoked with parsed params
+	 * @returns Disposable handle to unregister the handler
+	 */
+	registerCsiHandler(
+		id: ParserHandlerIdentifier,
+		handler: CsiHandler,
+	): Disposable;
+
+	/**
+	 * Register a handler for an ESC sequence, matched by its intermediate
+	 * bytes and final byte. Mirrors xterm.js `IParser.registerEscHandler`.
+	 *
+	 * Handlers for the same identifier are invoked in reverse registration
+	 * order; returning `true` consumes the sequence and suppresses sterk's
+	 * default processing. Async returns are accepted but treated as `false`
+	 * for the current dispatch (see {@link Parser.registerCsiHandler}).
+	 *
+	 * Note: the `prefix` field of the identifier is ignored for ESC handlers
+	 * (ESC sequences have no private-marker prefix).
+	 *
+	 * @param id - Sequence identifier (intermediates, final byte)
+	 * @param handler - Callback invoked when the ESC sequence is dispatched
+	 * @returns Disposable handle to unregister the handler
+	 */
+	registerEscHandler(
+		id: ParserHandlerIdentifier,
+		handler: EscHandler,
+	): Disposable;
+
+	/**
+	 * Register a handler for a DCS (Device Control String) sequence, matched
+	 * by prefix, intermediate bytes and final byte. Mirrors xterm.js
+	 * `IParser.registerDcsHandler`.
+	 *
+	 * LIMITATION: sterk's parser does not currently assemble the DCS payload
+	 * (the hook/put/unhook passthrough lifecycle is stubbed). DCS handlers are
+	 * therefore registered and dispatched on the DCS **final byte** with the
+	 * parsed params and an empty payload string. The handler's boolean return
+	 * is honoured (true consumes the sequence). Full payload assembly is
+	 * tracked for a follow-up; do not rely on receiving DCS data yet.
+	 *
+	 * @param id - Sequence identifier (prefix, intermediates, final byte)
+	 * @param handler - Callback invoked when the DCS sequence is dispatched
+	 * @returns Disposable handle to unregister the handler
+	 */
+	registerDcsHandler(
+		id: ParserHandlerIdentifier,
+		handler: DcsHandler,
+	): Disposable;
 }
+
+/**
+ * Identifies a CSI / ESC / DCS sequence for handler registration, matching
+ * xterm.js `IFunctionIdentifier`.
+ *
+ * Bytes are given as single-character strings (e.g. `"?"`, `"m"`). `prefix`
+ * is a single private-marker byte in the range `0x3c`–`0x3f` (`<=>?`).
+ * `intermediates` are bytes in the range `0x20`–`0x2f`. `final` is the final
+ * byte in the range `0x40`–`0x7e` (CSI/DCS) or `0x30`–`0x7e` (ESC).
+ */
+export interface ParserHandlerIdentifier {
+	/** Optional single-character private-marker prefix (`<`, `=`, `>`, `?`). */
+	prefix?: string;
+	/** Optional intermediate bytes as a string (e.g. `" "`, `"$"`). */
+	intermediates?: string;
+	/** Required final byte as a single-character string. */
+	final: string;
+}
+
+/**
+ * Callback invoked when a matching CSI sequence is dispatched.
+ *
+ * @param params - Parsed parameters. A plain parameter is a `number`; a
+ *   parameter carrying colon-separated sub-parameters is a `number[]`.
+ * @returns `true` to consume the sequence (suppress default processing),
+ *   `false`/`undefined` to fall through. A `Promise` is accepted for xterm
+ *   compatibility but treated as `false` for the current dispatch.
+ */
+export type CsiHandler = (
+	params: (number | number[])[],
+) => boolean | Promise<boolean>;
+
+/**
+ * Callback invoked when a matching ESC sequence is dispatched.
+ *
+ * @returns `true` to consume the sequence, `false`/`undefined` to fall
+ *   through. A `Promise` is accepted but treated as `false` for the current
+ *   dispatch (see {@link CsiHandler}).
+ */
+export type EscHandler = () => boolean | Promise<boolean>;
+
+/**
+ * Callback invoked when a matching DCS sequence is dispatched.
+ *
+ * @param data - The DCS payload. Currently always an empty string — see the
+ *   limitation note on {@link Parser.registerDcsHandler}.
+ * @param params - Parsed parameters (see {@link CsiHandler}).
+ * @returns `true` to consume the sequence, `false`/`undefined` to fall
+ *   through. A `Promise` is accepted but treated as `false`.
+ */
+export type DcsHandler = (
+	data: string,
+	params: (number | number[])[],
+) => boolean | Promise<boolean>;
 
 /**
  * Callback invoked when an OSC sequence is parsed.
@@ -1048,5 +1310,31 @@ export interface BuiltinTheme {
  * Calling dispose() unregisters the handler.
  */
 export interface Disposable {
+	dispose(): void;
+}
+
+// ── Addons ───────────────────────────────────────────────────────────
+
+/**
+ * Terminal addon interface. Mirrors xterm.js `ITerminalAddon`.
+ *
+ * An addon is loaded via {@link Terminal.loadAddon}, at which point its
+ * `activate()` method is called with the terminal instance. The terminal
+ * tracks every loaded addon and calls each addon's `dispose()` when the
+ * terminal itself is disposed, so an addon need not be torn down manually.
+ */
+export interface ITerminalAddon {
+	/**
+	 * Called when the addon is loaded via {@link Terminal.loadAddon}.
+	 *
+	 * @param terminal - The terminal the addon was loaded into
+	 */
+	activate(terminal: Terminal): void;
+
+	/**
+	 * Release any resources the addon holds. Called automatically when the
+	 * host terminal is disposed, or directly by the consumer to unload the
+	 * addon early.
+	 */
 	dispose(): void;
 }
