@@ -97,6 +97,10 @@ export class AceRenderer {
 		// Create wrapper with sterk class
 		this.wrapper = document.createElement("div");
 		this.wrapper.classList.add("sterk");
+		// Establish a positioning context so absolutely-positioned decoration
+		// overlays (appended to this wrapper) anchor to the grid origin rather
+		// than to some distant positioned ancestor in the consumer's layout.
+		this.wrapper.style.position = "relative";
 		container.appendChild(this.wrapper);
 
 		// Create viewport inside wrapper
@@ -486,6 +490,17 @@ export class AceRenderer {
 	 */
 	getElement(): HTMLElement {
 		return this.editor.container;
+	}
+
+	/**
+	 * The `.sterk` wrapper element (positioned container that holds the Ace
+	 * viewport). Decoration overlays are appended here so they sit above the
+	 * grid and scroll with the wrapper. The wrapper is `position: relative`
+	 * via the sterk stylesheet; if a consumer's CSS leaves it static the
+	 * overlay still anchors to the nearest positioned ancestor.
+	 */
+	getWrapper(): HTMLElement {
+		return this.wrapper;
 	}
 
 	/**

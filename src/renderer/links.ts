@@ -7,7 +7,7 @@
  * - File paths (absolute)
  */
 
-import type { Buffer } from "../types.js";
+import type { Buffer, ILinkProvider, IProvidedLink } from "../types.js";
 
 /**
  * URL pattern (simplified - matches http:// and https://)
@@ -33,7 +33,16 @@ export interface Link {
 	row: number;
 	startCol: number;
 	endCol: number;
+	/**
+	 * Optional activation handler for provider-supplied links. When present,
+	 * the link detector invokes it on click (in addition to emitting the
+	 * generic click event), passing the originating mouse event.
+	 */
+	activate?: (event: MouseEvent | undefined, text: string) => void;
 }
+
+/** A provider-supplied link source. */
+export type LinkProvider = ILinkProvider;
 
 /**
  * Scan a buffer line for links
@@ -122,6 +131,8 @@ export class LinkDetector {
 	private hoveredLink: Link | null = null;
 	private onHoverCallback: ((link: Link | null) => void) | null = null;
 	private onClickCallback: ((link: Link) => void) | null = null;
+	/** Registered external link providers (xterm.js parity). */
+	private providers: ILinkProvider[] = [];
 
 	constructor(
 		private element: HTMLElement,
@@ -154,6 +165,70 @@ export class LinkDetector {
 	}
 
 	/**
+	 * Register an external link provider. Returns an unregister function.
+	 * Provider links are consulted lazily per-row during hover hit-testing
+	 * (see {@link queryProviderLinksForRow}), so the provider is honoured
+	 * whether registered before or after the renderer is attached.
+	 */
+	addProvider(provider: ILinkProvider): () => void {
+		this.providers.push(provider);
+		return () => {
+			const idx = this.providers.indexOf(provider);
+			if (idx !== -1) this.providers.splice(idx, 1);
+		};
+	}
+
+	/**
+	 * Query all registered providers for links on a given ABSOLUTE buffer row
+	 * and map the provider's 1-based buffer coordinates onto the detector's
+	 * 0-based absolute-row / column model. Providers may invoke their callback
+	 * synchronously or asynchronously; only synchronously-delivered links are
+	 * available for the current hover hit-test (matching the synchronous
+	 * nature of mouse-move dispatch). xterm.js link providers in practice
+	 * resolve synchronously for already-rendered buffer content.
+	 */
+	private queryProviderLinksForRow(absRow: number): Link[] {
+		if (this.providers.length === 0) return [];
+		const collected: Link[] = [];
+		// xterm.js buffer line numbers are 1-based.
+		const bufferLineNumber = absRow + 1;
+		for (const provider of this.providers) {
+			provider.provideLinks(bufferLineNumber, (links) => {
+				if (!links) return;
+				for (const link of links) {
+					collected.push(this.providedLinkToLink(link));
+				}
+			});
+		}
+		return collected;
+	}
+
+	/**
+	 * Convert an xterm.js-style provided link (1-based buffer coords) into the
+	 * detector's internal {@link Link} (0-based absolute row, 0-based
+	 * half-open column range). Single-line links are assumed (the common
+	 * case); for a multi-line range we clamp to the start line's span.
+	 */
+	private providedLinkToLink(link: IProvidedLink): Link {
+		const row = link.range.start.y - 1;
+		const startCol = Math.max(0, link.range.start.x - 1);
+		// endCol is half-open (exclusive). xterm.js end.x is the inclusive
+		// 1-based last column, so the exclusive 0-based end is end.x.
+		const endCol =
+			link.range.end.y === link.range.start.y
+				? Math.max(startCol + 1, link.range.end.x)
+				: startCol + link.text.length;
+		return {
+			type: "url",
+			text: link.text,
+			row,
+			startCol,
+			endCol,
+			activate: link.activate,
+		};
+	}
+
+	/**
 	 * Handle mouse move - detect link hover
 	 */
 	private handleMouseMove = (event: MouseEvent): void => {
@@ -167,10 +242,17 @@ export class LinkDetector {
 		const col = Math.floor(x / metrics.width);
 		const row = Math.floor(y / metrics.height) + this.buffer().viewportY;
 
-		// Find link at this position
-		const link = this.links.find(
-			(l) => l.row === row && col >= l.startCol && col < l.endCol,
-		);
+		// Find a built-in detected link at this position, falling back to any
+		// provider-supplied link for the hovered row. Provider links take
+		// precedence (consumers register them to override / augment detection).
+		const providerLinks = this.queryProviderLinksForRow(row);
+		const link =
+			providerLinks.find(
+				(l) => l.row === row && col >= l.startCol && col < l.endCol,
+			) ??
+			this.links.find(
+				(l) => l.row === row && col >= l.startCol && col < l.endCol,
+			);
 
 		if (link !== this.hoveredLink) {
 			this.hoveredLink = link ?? null;
@@ -186,8 +268,13 @@ export class LinkDetector {
 	/**
 	 * Handle click - emit link click event
 	 */
-	private handleClick = (): void => {
-		if (this.hoveredLink && this.onClickCallback) {
+	private handleClick = (event: MouseEvent): void => {
+		if (!this.hoveredLink) return;
+		// Provider-supplied links carry their own activation handler — invoke
+		// it (xterm.js semantics) in addition to the generic click event so
+		// existing consumers of onClick still fire.
+		this.hoveredLink.activate?.(event, this.hoveredLink.text);
+		if (this.onClickCallback) {
 			this.onClickCallback(this.hoveredLink);
 		}
 	};
@@ -200,5 +287,6 @@ export class LinkDetector {
 		this.element.removeEventListener("click", this.handleClick);
 		this.onHoverCallback = null;
 		this.onClickCallback = null;
+		this.providers = [];
 	}
 }

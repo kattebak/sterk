@@ -524,11 +524,243 @@ export interface Terminal {
 	 */
 	onSelectionChange?(callback: () => void): Disposable;
 
+	// ── Markers / Decorations / Link providers (xterm.js-compatible) ──
+
+	/**
+	 * Register a marker anchored to a buffer line, mirroring xterm.js
+	 * `Terminal.registerMarker(cursorYOffset?)`.
+	 *
+	 * The marker anchors to the buffer line at the cursor's current row plus
+	 * `cursorYOffset` (a signed offset; defaults to `0`, i.e. the cursor's own
+	 * row). The returned {@link IMarker}'s `line` getter tracks the buffer as
+	 * content scrolls: it reports the marker's CURRENT absolute buffer row
+	 * (the same coordinate space as {@link Buffer.length} and
+	 * {@link Buffer.getLine}), so as new lines push the anchored line up
+	 * through scrollback the value stays pointed at the same logical line.
+	 *
+	 * The marker auto-disposes (firing `onDispose`) when its line scrolls out
+	 * of the retained buffer (dropped from scrollback) or on a full
+	 * {@link Terminal.clear}/{@link Terminal.reset}. It can also be disposed
+	 * explicitly.
+	 *
+	 * Returns `undefined` if a marker cannot be created (e.g. the resolved row
+	 * is out of range).
+	 *
+	 * @param cursorYOffset - Signed row offset from the current cursor row
+	 *   (default `0`).
+	 */
+	registerMarker(cursorYOffset?: number): IMarker | undefined;
+
+	/**
+	 * Register a decoration attached to a marker, mirroring xterm.js
+	 * `Terminal.registerDecoration(options)`.
+	 *
+	 * The decoration's lifecycle (object identity, `onRender`, `onDispose`,
+	 * `dispose()`) is implemented faithfully and the decoration disposes when
+	 * its backing marker disposes.
+	 *
+	 * RENDERING FIDELITY (Ace layer): sterk renders the grid through Ace,
+	 * which owns the visible DOM. A decoration anchors a positioned overlay
+	 * `element` over its marker's row inside the renderer's wrapper once the
+	 * terminal has been {@link Terminal.open}ed; `onRender` fires with that
+	 * element each time it is (re)positioned. In headless mode (before
+	 * `open()`) there is no DOM to attach to, so `element` stays `undefined`
+	 * and `onRender` does NOT fire — the object lifecycle still works. The
+	 * overlay is positioned by row (and `x`/`width` in cell units when given);
+	 * it is intentionally a minimal absolutely-positioned box rather than a
+	 * pixel-perfect reproduction of xterm's canvas-integrated decorations.
+	 *
+	 * Returns `undefined` if `options.marker` is already disposed.
+	 *
+	 * @param options - Decoration options (must include a live `marker`).
+	 */
+	registerDecoration(options: IDecorationOptions): IDecoration | undefined;
+
+	/**
+	 * Register an external link provider, mirroring xterm.js
+	 * `Terminal.registerLinkProvider(provider)`.
+	 *
+	 * Provided links are merged with sterk's built-in URL/path detection and
+	 * become hover/clickable through the same link-handling path. The provider
+	 * is queried per buffer line (1-based, matching xterm.js
+	 * `ILinkProvider.provideLinks(bufferLineNumber, callback)`); the callback
+	 * delivers the links for that line (or `undefined` for none).
+	 *
+	 * Disposing the returned {@link Disposable} stops further delivery from
+	 * that provider.
+	 *
+	 * INTEGRATION NOTE (Ace layer): link hit-testing runs against the live
+	 * buffer on hover. Providers are consulted lazily for the hovered line, so
+	 * a provider registered before {@link Terminal.open} is honoured once the
+	 * renderer is attached.
+	 *
+	 * @param provider - The link provider.
+	 */
+	registerLinkProvider(provider: ILinkProvider): Disposable;
+
 	/**
 	 * Clean up resources and detach event listeners.
 	 * The Terminal instance should not be used after calling dispose().
 	 */
 	dispose(): void;
+}
+
+// ── Markers / Decorations / Link providers ───────────────────────────
+
+/**
+ * A marker anchored to a buffer line. Mirrors xterm.js `IMarker`.
+ *
+ * Created via {@link Terminal.registerMarker}. The `line` getter follows the
+ * buffer as content scrolls (see {@link Terminal.registerMarker}); when the
+ * anchored line is dropped from the buffer the marker auto-disposes.
+ */
+export interface IMarker extends Disposable {
+	/** Unique, monotonically increasing id for this marker. */
+	readonly id: number;
+
+	/**
+	 * Current ABSOLUTE buffer row index of the anchored line (same coordinate
+	 * space as {@link Buffer.length} / {@link Buffer.getLine}). Reads `-1`
+	 * once the marker has been disposed.
+	 */
+	readonly line: number;
+
+	/** Whether this marker has been disposed (auto or explicit). */
+	readonly isDisposed: boolean;
+
+	/**
+	 * Register a callback invoked once when this marker is disposed. Mirrors
+	 * xterm.js `IMarker.onDispose`.
+	 *
+	 * @param callback - Function invoked on dispose
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onDispose(callback: () => void): Disposable;
+}
+
+/**
+ * Options for {@link Terminal.registerDecoration}. Mirrors the subset of
+ * xterm.js `IDecorationOptions` that sterk supports.
+ */
+export interface IDecorationOptions {
+	/** The marker the decoration is anchored to (required). */
+	marker: IMarker;
+
+	/**
+	 * Optional 0-based start column for the overlay, in cell units. When
+	 * omitted the overlay spans the row from the left edge.
+	 */
+	x?: number;
+
+	/**
+	 * Optional overlay width in cell units. When omitted the overlay is a
+	 * thin marker box (xterm.js defaults to `1`).
+	 */
+	width?: number;
+
+	/**
+	 * Optional overlay height in row units (defaults to `1`). Accepted for
+	 * xterm.js signature compatibility.
+	 */
+	height?: number;
+
+	/**
+	 * Where the overlay anchors horizontally: `'left'` (default) or `'right'`
+	 * of the viewport. Accepted for xterm.js signature compatibility; the
+	 * Ace-layer overlay honours `'left'`.
+	 */
+	anchor?: "left" | "right";
+
+	/** Optional CSS background color applied to the overlay element. */
+	backgroundColor?: string;
+
+	/** Optional CSS foreground color applied to the overlay element. */
+	foregroundColor?: string;
+
+	/** Optional layer hint: `'bottom'` (default) or `'top'`. */
+	layer?: "bottom" | "top";
+}
+
+/**
+ * A decoration attached to a marker. Mirrors xterm.js `IDecoration`.
+ *
+ * See {@link Terminal.registerDecoration} for the Ace-layer rendering
+ * fidelity note.
+ */
+export interface IDecoration extends Disposable {
+	/** The marker this decoration is anchored to. */
+	readonly marker: IMarker;
+
+	/**
+	 * The overlay DOM element, once it has been created and attached. Stays
+	 * `undefined` in headless mode (before {@link Terminal.open}).
+	 */
+	readonly element?: HTMLElement;
+
+	/** Whether this decoration has been disposed. */
+	readonly isDisposed: boolean;
+
+	/**
+	 * Register a callback invoked when the decoration's overlay element is
+	 * rendered/repositioned, receiving the element. Mirrors xterm.js
+	 * `IDecoration.onRender`. Does NOT fire in headless mode (no DOM).
+	 *
+	 * @param callback - Function receiving the overlay element
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onRender(callback: (element: HTMLElement) => void): Disposable;
+
+	/**
+	 * Register a callback invoked once when the decoration is disposed.
+	 * Mirrors xterm.js `IDecoration.onDispose`.
+	 *
+	 * @param callback - Function invoked on dispose
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onDispose(callback: () => void): Disposable;
+}
+
+/**
+ * A link supplied by an {@link ILinkProvider}. Mirrors the geometry-bearing
+ * subset of xterm.js `ILink`.
+ */
+export interface IProvidedLink {
+	/**
+	 * The link range in buffer coordinates (1-based, matching xterm.js
+	 * `ILink.range`): `{ start: { x, y }, end: { x, y } }` where `x` is the
+	 * 1-based column and `y` is the 1-based buffer line number.
+	 */
+	range: {
+		start: { x: number; y: number };
+		end: { x: number; y: number };
+	};
+
+	/** The link text. */
+	text: string;
+
+	/**
+	 * Optional activation handler invoked when the link is clicked. Receives
+	 * the originating event (or `undefined` in synthetic activation) and the
+	 * link text.
+	 */
+	activate?: (event: MouseEvent | undefined, text: string) => void;
+}
+
+/**
+ * An external link provider. Mirrors xterm.js `ILinkProvider`.
+ */
+export interface ILinkProvider {
+	/**
+	 * Provide the links for a given buffer line. Mirrors xterm.js
+	 * `ILinkProvider.provideLinks(bufferLineNumber, callback)`.
+	 *
+	 * @param bufferLineNumber - 1-based buffer line number to scan
+	 * @param callback - Invoked with the links for that line, or `undefined`
+	 */
+	provideLinks(
+		bufferLineNumber: number,
+		callback: (links: IProvidedLink[] | undefined) => void,
+	): void;
 }
 
 // ── Buffer Access ────────────────────────────────────────────────────
