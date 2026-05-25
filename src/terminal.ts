@@ -182,23 +182,57 @@ export class TerminalImpl implements Terminal {
 	}
 
 	write(data: string | Uint8Array, callback?: () => void): void {
+		// Snapshot cursor + viewport so we can emit onCursorMove / onScroll
+		// only when a write actually moved them (no spurious fires on no-op
+		// writes). LF / BEL events fire synchronously from the parser action
+		// handlers as the bytes are processed.
+		const beforeCursorX = this.scrollBuffer.cursorX;
+		const beforeCursorY = this.scrollBuffer.cursorY;
+		const beforeViewportY = this.scrollBuffer.viewportY;
+
 		this.vtParser.write(data);
 		if (this.aceRenderer) {
 			this.aceRenderer.scheduleUpdate();
 		}
+
+		if (
+			this.scrollBuffer.cursorX !== beforeCursorX ||
+			this.scrollBuffer.cursorY !== beforeCursorY
+		) {
+			this.emitter.emit("cursor-move");
+		}
+		this.emitScrollIfChanged(beforeViewportY);
+
 		this.emitter.emit("write-parsed");
 		if (callback) {
 			callback();
 		}
 	}
 
+	/**
+	 * Emit an `onScroll` event if the viewport top line has moved since the
+	 * supplied snapshot. xterm.js passes `ydisp` (the new top line); we pass
+	 * the equivalent `viewportY`.
+	 */
+	private emitScrollIfChanged(beforeViewportY: number): void {
+		const after = this.scrollBuffer.viewportY;
+		if (after !== beforeViewportY) {
+			this.emitter.emit("scroll", after);
+		}
+	}
+
 	resize(cols: number, rows: number): void {
+		// Don't fire onResize for no-op resizes to the same dimensions.
+		if (cols === this._options.cols && rows === this._options.rows) {
+			return;
+		}
 		this._options.cols = cols;
 		this._options.rows = rows;
 		this.scrollBuffer.resize(cols, rows);
 		if (this.aceRenderer) {
 			this.aceRenderer.resize(cols, rows);
 		}
+		this.emitter.emit("resize", { cols, rows });
 	}
 
 	clear(): void {
@@ -207,17 +241,21 @@ export class TerminalImpl implements Terminal {
 	}
 
 	scrollLines(lines: number): void {
+		const beforeViewportY = this.scrollBuffer.viewportY;
 		this.scrollBuffer.scrollViewport(lines);
 		if (this.aceRenderer) {
 			this.aceRenderer.scheduleUpdate();
 		}
+		this.emitScrollIfChanged(beforeViewportY);
 	}
 
 	scrollToBottom(): void {
+		const beforeViewportY = this.scrollBuffer.viewportY;
 		this.scrollBuffer.scrollToBottom();
 		if (this.aceRenderer) {
 			this.aceRenderer.scheduleUpdate();
 		}
+		this.emitScrollIfChanged(beforeViewportY);
 	}
 
 	/**
@@ -267,6 +305,75 @@ export class TerminalImpl implements Terminal {
 		return {
 			dispose: () => {
 				this.emitter.off("data", wrapper);
+			},
+		};
+	}
+
+	onResize(
+		callback: (size: { cols: number; rows: number }) => void,
+	): Disposable {
+		const wrapper = (size: unknown) => {
+			callback(size as { cols: number; rows: number });
+		};
+		this.emitter.on("resize", wrapper);
+		return {
+			dispose: () => {
+				this.emitter.off("resize", wrapper);
+			},
+		};
+	}
+
+	onLineFeed(callback: () => void): Disposable {
+		this.emitter.on("line-feed", callback);
+		return {
+			dispose: () => {
+				this.emitter.off("line-feed", callback);
+			},
+		};
+	}
+
+	onBell(callback: () => void): Disposable {
+		this.emitter.on("bell", callback);
+		return {
+			dispose: () => {
+				this.emitter.off("bell", callback);
+			},
+		};
+	}
+
+	onScroll(callback: (newPosition: number) => void): Disposable {
+		const wrapper = (position: unknown) => {
+			if (typeof position === "number") {
+				callback(position);
+			}
+		};
+		this.emitter.on("scroll", wrapper);
+		return {
+			dispose: () => {
+				this.emitter.off("scroll", wrapper);
+			},
+		};
+	}
+
+	onCursorMove(callback: () => void): Disposable {
+		this.emitter.on("cursor-move", callback);
+		return {
+			dispose: () => {
+				this.emitter.off("cursor-move", callback);
+			},
+		};
+	}
+
+	onTitleChange(callback: (title: string) => void): Disposable {
+		const wrapper = (title: unknown) => {
+			if (typeof title === "string") {
+				callback(title);
+			}
+		};
+		this.emitter.on("title-change", wrapper);
+		return {
+			dispose: () => {
+				this.emitter.off("title-change", wrapper);
 			},
 		};
 	}
@@ -486,6 +593,12 @@ export class TerminalImpl implements Terminal {
 			case 0x0b: // VT (vertical tab, treat as LF)
 			case 0x0c: // FF (form feed, treat as LF)
 				{
+					// onLineFeed fires for an actual line feed (LF, 0x0a),
+					// matching xterm.js (VT/FF are treated as LF for cursor
+					// movement but are not "line feed" events).
+					if (code === 0x0a) {
+						this.emitter.emit("line-feed");
+					}
 					// Modern terminals treat LF as newline (LF+CR) by default
 					const y = this.scrollBuffer.cursorY;
 					if (y >= this.rows - 1) {
@@ -670,9 +783,14 @@ export class TerminalImpl implements Terminal {
 	/**
 	 * Handle OSC sequences
 	 */
-	private handleOscDispatch(_id: number, _data: string): void {
-		// OSC sequences are handled by registered handlers
-		// We don't auto-handle any OSC sequences in the terminal itself
+	private handleOscDispatch(id: number, data: string): void {
+		// OSC 0 (icon name + window title) and OSC 2 (window title) carry the
+		// terminal title string. Emit onTitleChange for both, matching
+		// xterm.js. Consumer-registered OSC handlers (including OSC 133) are
+		// invoked independently by the parser and are not disturbed here.
+		if (id === 0 || id === 2) {
+			this.emitter.emit("title-change", data);
+		}
 	}
 
 	/**
