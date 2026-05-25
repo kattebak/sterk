@@ -204,6 +204,9 @@ export class TerminalImpl implements Terminal {
 	clear(): void {
 		this.scrollBuffer.clear();
 		this.vtParser.currentAttrs = { ...DEFAULT_CELL_ATTRIBUTES };
+		// Buffer content was reset wholesale; drop the renderer's per-row
+		// attribute signatures so none can suppress a needed re-render later.
+		this.aceRenderer?.resetLineSignatures();
 	}
 
 	scrollLines(lines: number): void {
