@@ -136,6 +136,20 @@ class BufferCellImpl implements BufferCell {
 		return this.cell.code;
 	}
 
+	getWidth(): number {
+		// Trailing slot of a width-2 glyph occupies a column but renders no
+		// glyph — report width 0 (xterm.js semantics).
+		if (this.cell.isPlaceholder) {
+			return 0;
+		}
+		// Otherwise derive from the cell's own code point. wcwidth returns
+		// -1 (unprintable) / 0 (combining) / 1 / 2; clamp anything non-2
+		// down to a minimum of 1 so a normal printable / combining-base
+		// cell stays width 1.
+		const w = wcwidth(this.cell.code);
+		return w === 2 ? 2 : w === 0 ? 0 : 1;
+	}
+
 	// Foreground color accessors
 	isFgDefault(): boolean {
 		return this.cell.attrs.fgMode === 0;
@@ -218,6 +232,10 @@ class BufferLineImpl implements BufferLine {
 		return this.line.isWrapped;
 	}
 
+	get length(): number {
+		return this.line.cells.length;
+	}
+
 	translateToString(trimRight = false): string {
 		let text = this.line.cells.map((cell) => cell.chars).join("");
 		if (trimRight) {
@@ -245,6 +263,8 @@ export class ScrollBuffer implements Buffer {
 	/** Number of columns in the buffer */
 	cols: number;
 	private rows: number;
+	/** Which screen role this buffer serves ("normal" | "alternate") */
+	private _type: "normal" | "alternate";
 
 	/** Absolute row index of the first scrollback line */
 	private _baseY = 0;
@@ -255,9 +275,15 @@ export class ScrollBuffer implements Buffer {
 	/** Cursor Y position (row, relative to viewport) */
 	private _cursorY = 0;
 
-	constructor(cols: number, rows: number, scrollback: number) {
+	constructor(
+		cols: number,
+		rows: number,
+		scrollback: number,
+		type: "normal" | "alternate" = "normal",
+	) {
 		this.cols = cols;
 		this.rows = rows;
+		this._type = type;
 		this.maxLines = rows + scrollback;
 
 		// Initialize with blank lines
@@ -286,6 +312,10 @@ export class ScrollBuffer implements Buffer {
 
 	get viewportY(): number {
 		return this._viewportY;
+	}
+
+	get type(): "normal" | "alternate" {
+		return this._type;
 	}
 
 	/**
@@ -322,6 +352,10 @@ export class ScrollBuffer implements Buffer {
 		}
 		const line = this.lines[y];
 		return line ? new BufferLineImpl(line) : null;
+	}
+
+	getNullCell(): BufferCell {
+		return new BufferCellImpl(createBlankCell());
 	}
 
 	// ── Buffer mutation methods (internal, used by VT parser) ───────
@@ -647,9 +681,9 @@ export class BufferNamespaceImpl implements BufferNamespace {
 
 	constructor(cols: number, rows: number, scrollback: number) {
 		// Normal buffer has scrollback
-		this.normalBuffer = new ScrollBuffer(cols, rows, scrollback);
+		this.normalBuffer = new ScrollBuffer(cols, rows, scrollback, "normal");
 		// Alternate buffer has NO scrollback (standard terminal behavior)
-		this.alternateBuffer = new ScrollBuffer(cols, rows, 0);
+		this.alternateBuffer = new ScrollBuffer(cols, rows, 0, "alternate");
 		this.activeBuffer = this.normalBuffer;
 	}
 
@@ -658,16 +692,16 @@ export class BufferNamespaceImpl implements BufferNamespace {
 	}
 
 	/**
-	 * Get the normal buffer (for internal use).
-	 * @internal
+	 * The normal (primary) buffer. Public xterm-compatible accessor; also
+	 * returned by `active` when not in alternate-screen mode.
 	 */
 	get normal(): ScrollBuffer {
 		return this.normalBuffer;
 	}
 
 	/**
-	 * Get the alternate buffer (for internal use).
-	 * @internal
+	 * The alternate screen buffer. Public xterm-compatible accessor; also
+	 * returned by `active` while in alternate-screen mode.
 	 */
 	get alternate(): ScrollBuffer {
 		return this.alternateBuffer;
