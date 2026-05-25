@@ -52,6 +52,67 @@ export interface Terminal {
 	write(data: string | Uint8Array, callback?: () => void): void;
 
 	/**
+	 * Write data to the terminal followed by a CRLF (`\r\n`).
+	 * Convenience wrapper around {@link Terminal.write} that matches the
+	 * xterm.js `writeln` API.
+	 *
+	 * @param data - String or binary data to write
+	 * @param callback - Optional callback invoked after the write completes
+	 */
+	writeln(data: string | Uint8Array, callback?: () => void): void;
+
+	/**
+	 * Full terminal reset (RIS-like, matches xterm.js `reset()`).
+	 *
+	 * Restores the terminal to its power-on state:
+	 * - clears the buffer and homes the cursor (via {@link Terminal.clear})
+	 * - resets SGR attributes (fg/bg color, bold, italic, underline,
+	 *   inverse, dim) to their defaults
+	 * - leaves the alternate screen and returns to the normal buffer if
+	 *   alternate mode is active
+	 * - resets the VT parser to its GROUND state, dropping any half-parsed
+	 *   escape / CSI / OSC sequence and pending UTF-8 bytes
+	 *
+	 * Registered OSC handlers and event subscriptions are preserved.
+	 */
+	reset(): void;
+
+	/**
+	 * Move keyboard focus to the terminal's input surface.
+	 * No-op in headless mode (before {@link Terminal.open} is called).
+	 */
+	focus(): void;
+
+	/**
+	 * Remove keyboard focus from the terminal's input surface.
+	 * No-op in headless mode (before {@link Terminal.open} is called).
+	 */
+	blur(): void;
+
+	/**
+	 * Inject `data` into the terminal as if the user pasted it.
+	 *
+	 * Routes through the same path as {@link Terminal.send} — the data is
+	 * emitted via `onData` for forwarding to the backend. The codebase does
+	 * not track bracketed-paste mode (DEC 2004), so the data is sent
+	 * verbatim (plain paste) rather than wrapped in paste-start/-end markers.
+	 *
+	 * @param data - The text to paste
+	 */
+	paste(data: string): void;
+
+	/**
+	 * Send input data to the terminal (alias of {@link Terminal.send},
+	 * matching the xterm.js `input` API).
+	 *
+	 * @param data - String or binary data to send
+	 * @param wasUserInput - Accepted for xterm.js signature compatibility;
+	 *   currently ignored (sterk does not distinguish synthetic from user
+	 *   input on this path).
+	 */
+	input(data: string | Uint8Array, wasUserInput?: boolean): void;
+
+	/**
 	 * Resize the terminal to the specified dimensions.
 	 * Triggers a reflow of the buffer and redraws the viewport.
 	 *
@@ -292,6 +353,19 @@ export interface BufferNamespace {
 	 * when the terminal is in alternate screen mode (e.g. inside vim/less).
 	 */
 	readonly active: Buffer;
+
+	/**
+	 * The normal (primary) buffer. Always available regardless of which
+	 * buffer is currently active. Carries the scrollback history.
+	 */
+	readonly normal: Buffer;
+
+	/**
+	 * The alternate screen buffer. Always available regardless of which
+	 * buffer is currently active. Has no scrollback (standard terminal
+	 * behavior — used by full-screen apps like vim/less).
+	 */
+	readonly alternate: Buffer;
 }
 
 /**
@@ -332,12 +406,26 @@ export interface Buffer {
 	readonly viewportY: number;
 
 	/**
+	 * Which role this buffer serves: the `"normal"` (primary) buffer or
+	 * the `"alternate"` screen buffer. Matches xterm.js `IBuffer.type`.
+	 * `buffer.active.type` reflects the currently active screen.
+	 */
+	readonly type: "normal" | "alternate";
+
+	/**
 	 * Get a specific line from the buffer by absolute row index.
 	 *
 	 * @param y - Absolute row index (0 to length-1)
 	 * @returns BufferLine if the row exists, null otherwise
 	 */
 	getLine(y: number): BufferLine | null;
+
+	/**
+	 * Return a blank default cell (space glyph, default attributes,
+	 * no styles). Useful as a reference/sentinel when iterating cells.
+	 * Matches xterm.js `IBuffer.getNullCell()`.
+	 */
+	getNullCell(): BufferCell;
 }
 
 /**
@@ -366,6 +454,12 @@ export interface BufferLine {
 	 * @returns BufferCell if the column exists, or a blank cell placeholder
 	 */
 	getCell(x: number): BufferCell;
+
+	/**
+	 * Number of cells in this line. Normally equal to the buffer's column
+	 * count. Matches xterm.js `IBufferLine.length`.
+	 */
+	readonly length: number;
 }
 
 /**
@@ -384,6 +478,14 @@ export interface BufferCell {
 	 * Returns 0 for blank cells.
 	 */
 	getCode(): number;
+
+	/**
+	 * The column width of this cell: `2` for the leading cell of a wide
+	 * glyph (CJK ideograph, emoji), `0` for the trailing placeholder of a
+	 * wide glyph (and any zero-width content), `1` otherwise. Matches
+	 * xterm.js `IBufferCell.getWidth()`.
+	 */
+	getWidth(): number;
 
 	// ── Foreground color ─────────────────────────────────────────────
 
