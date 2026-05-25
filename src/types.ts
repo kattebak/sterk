@@ -368,6 +368,88 @@ export interface Terminal {
 	 */
 	setFont?(fontId: string): void;
 
+	// ── Selection (xterm.js-compatible) ──────────────────────────────
+	//
+	// Sterk renders through Ace, so the selection surface delegates to
+	// Ace's selection model. These are additive and only do meaningful
+	// work once {@link Terminal.open} has attached a renderer; in headless
+	// mode they are safe no-ops (and `hasSelection`/`getSelection` report
+	// "no selection").
+
+	/**
+	 * Whether the terminal currently has a non-empty text selection.
+	 * Mirrors xterm.js `Terminal.hasSelection()`. Returns `false` in
+	 * headless mode (before {@link Terminal.open}).
+	 */
+	hasSelection?(): boolean;
+
+	/**
+	 * Get the selected text. Mirrors xterm.js `Terminal.getSelection()`.
+	 * Returns an empty string when nothing is selected or in headless mode.
+	 */
+	getSelection?(): string;
+
+	/**
+	 * Get the position of the current selection as buffer coordinates
+	 * (`{ start: { x, y }, end: { x, y } }`), or `undefined` when there is
+	 * no selection. Mirrors xterm.js `Terminal.getSelectionPosition()`
+	 * (which returns an `IBufferRange | undefined`).
+	 *
+	 * `x` is the 0-based column; `y` is the 0-based ABSOLUTE buffer row
+	 * (including scrollback), matching xterm's `IBufferRange`. Returns
+	 * `undefined` in headless mode.
+	 */
+	getSelectionPosition?():
+		| { start: { x: number; y: number }; end: { x: number; y: number } }
+		| undefined;
+
+	/**
+	 * Clear the current selection. Mirrors xterm.js
+	 * `Terminal.clearSelection()`. No-op in headless mode.
+	 */
+	clearSelection?(): void;
+
+	/**
+	 * Select `length` cells starting at the given column on the given
+	 * VIEWPORT row. Mirrors xterm.js `Terminal.select(column, row, length)`,
+	 * where `row` is relative to the top of the current viewport.
+	 *
+	 * The selection is mapped onto the underlying Ace document accounting
+	 * for the current scroll offset (`viewportY`). No-op in headless mode.
+	 *
+	 * @param column - 0-based start column
+	 * @param row - 0-based row relative to the viewport top
+	 * @param length - number of cells to select
+	 */
+	select?(column: number, row: number, length: number): void;
+
+	/**
+	 * Select the entire buffer (scrollback + screen). Mirrors xterm.js
+	 * `Terminal.selectAll()`. No-op in headless mode.
+	 */
+	selectAll?(): void;
+
+	/**
+	 * Select the lines between `start` and `end` (inclusive), addressed by
+	 * ABSOLUTE buffer row index (including scrollback). Mirrors xterm.js
+	 * `Terminal.selectLines(start, end)`. No-op in headless mode.
+	 *
+	 * @param start - 0-based absolute start row
+	 * @param end - 0-based absolute end row (inclusive)
+	 */
+	selectLines?(start: number, end: number): void;
+
+	/**
+	 * Register a callback invoked whenever the selection changes. Mirrors
+	 * xterm.js `Terminal.onSelectionChange`. The Disposable's `dispose()`
+	 * stops further delivery. In headless mode the subscription is inert
+	 * (the callback never fires) but `dispose()` is still safe to call.
+	 *
+	 * @param callback - Function invoked on each selection change
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onSelectionChange?(callback: () => void): Disposable;
+
 	/**
 	 * Clean up resources and detach event listeners.
 	 * The Terminal instance should not be used after calling dispose().
