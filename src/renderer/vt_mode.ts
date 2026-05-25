@@ -139,9 +139,17 @@ export class VtMode {
 }
 
 /**
- * Build CSS class name for a cell based on its attributes
+ * Build CSS class name for a cell based on its attributes.
+ *
+ * Exported so the renderer can derive a per-row attribute *signature* from the
+ * exact same logic that produces the rendered token classes. Computing the
+ * signature any other way risks drift (a class change the signature misses →
+ * stale DOM); reusing this function makes the signature correct by
+ * construction — if the rendered class changes, the signature changes.
  */
-function buildCellClassName(cell: import("../types.js").BufferCell): string {
+export function buildCellClassName(
+	cell: import("../types.js").BufferCell,
+): string {
 	const classes: string[] = [];
 
 	// Determine fg/bg colors (handle inverse)
