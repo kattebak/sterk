@@ -479,6 +479,22 @@ export class AceRenderer {
 	}
 
 	/**
+	 * Focus the underlying Ace editor (moves keyboard focus to its hidden
+	 * textarea). Passthrough for `Terminal.focus()`.
+	 */
+	focus(): void {
+		this.editor.focus();
+	}
+
+	/**
+	 * Blur the underlying Ace editor (removes keyboard focus from its
+	 * hidden textarea). Passthrough for `Terminal.blur()`.
+	 */
+	blur(): void {
+		this.editor.blur();
+	}
+
+	/**
 	 * Handle buffer switch (normal ↔ alternate screen)
 	 * Called when terminal switches between buffers
 	 */
