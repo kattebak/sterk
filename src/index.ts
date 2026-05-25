@@ -22,6 +22,7 @@ export type {
 	DcsHandler,
 	Disposable,
 	EscHandler,
+	ITerminalAddon,
 	OscHandler,
 	Parser,
 	ParserHandlerIdentifier,
