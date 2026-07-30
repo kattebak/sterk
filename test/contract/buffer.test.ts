@@ -39,7 +39,7 @@ describe("contract: buffer & scrollback", () => {
 			expect(typeof cell?.isBold).toBe("function");
 			expect(typeof cell?.isFgPalette).toBe("function");
 			expect(typeof cell?.getBgColor).toBe("function");
-			expect(cell?.isBold()).toBe(true);
+			expect(cell?.isBold()).toBe(1);
 			expect(cell?.getFgColor()).toBe(1);
 			expect(cell?.getBgColor()).toBe(2);
 			term.dispose();

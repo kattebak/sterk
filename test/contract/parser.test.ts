@@ -24,7 +24,7 @@ describe("contract: parser", () => {
 			const term = createTerminal({ cols: 20, rows: 2 });
 			term.write("\x1b[31mR\x1b[32mG\x1b[34mB");
 			const line = term.buffer.active.getLine(0);
-			expect(line?.getCell(0).isFgPalette()).toBe(true);
+			expect(line?.getCell(0).isFgPalette()).toBe(1);
 			expect(line?.getCell(0).getFgColor()).toBe(1); // red
 			expect(line?.getCell(1).getFgColor()).toBe(2); // green
 			expect(line?.getCell(2).getFgColor()).toBe(4); // blue
@@ -35,7 +35,7 @@ describe("contract: parser", () => {
 			const term = createTerminal({ cols: 20, rows: 2 });
 			term.write("\x1b[91mX");
 			const cell = term.buffer.active.getLine(0)?.getCell(0);
-			expect(cell?.isFgPalette()).toBe(true);
+			expect(cell?.isFgPalette()).toBe(1);
 			expect(cell?.getFgColor()).toBe(9); // bright red
 			term.dispose();
 		});
@@ -44,7 +44,7 @@ describe("contract: parser", () => {
 			const term = createTerminal({ cols: 20, rows: 2 });
 			term.write("\x1b[38;5;202mO");
 			const cell = term.buffer.active.getLine(0)?.getCell(0);
-			expect(cell?.isFgPalette()).toBe(true);
+			expect(cell?.isFgPalette()).toBe(1);
 			expect(cell?.getFgColor()).toBe(202);
 			term.dispose();
 		});
@@ -53,7 +53,7 @@ describe("contract: parser", () => {
 			const term = createTerminal({ cols: 20, rows: 2 });
 			term.write("\x1b[38;2;255;128;0mO");
 			const cell = term.buffer.active.getLine(0)?.getCell(0);
-			expect(cell?.isFgRGB()).toBe(true);
+			expect(cell?.isFgRGB()).toBe(1);
 			expect(cell?.getFgColor()).toBe(0xff8000);
 			term.dispose();
 		});
@@ -61,14 +61,14 @@ describe("contract: parser", () => {
 		it("parses italic (SGR 3) — beyond aceterm", () => {
 			const term = createTerminal({ cols: 20, rows: 2 });
 			term.write("\x1b[3mI");
-			expect(term.buffer.active.getLine(0)?.getCell(0).isItalic()).toBe(true);
+			expect(term.buffer.active.getLine(0)?.getCell(0).isItalic()).toBe(1);
 			term.dispose();
 		});
 
 		it("parses dim (SGR 2) — beyond aceterm", () => {
 			const term = createTerminal({ cols: 20, rows: 2 });
 			term.write("\x1b[2mD");
-			expect(term.buffer.active.getLine(0)?.getCell(0).isDim()).toBe(true);
+			expect(term.buffer.active.getLine(0)?.getCell(0).isDim()).toBe(1);
 			term.dispose();
 		});
 
@@ -76,9 +76,9 @@ describe("contract: parser", () => {
 			const term = createTerminal({ cols: 20, rows: 2 });
 			term.write("\x1b[1;4;7mX");
 			const cell = term.buffer.active.getLine(0)?.getCell(0);
-			expect(cell?.isBold()).toBe(true);
-			expect(cell?.isUnderline()).toBe(true);
-			expect(cell?.isInverse()).toBe(true);
+			expect(cell?.isBold()).toBe(1);
+			expect(cell?.isUnderline()).toBe(1);
+			expect(cell?.isInverse()).toBe(1);
 			term.dispose();
 		});
 
@@ -86,8 +86,8 @@ describe("contract: parser", () => {
 			const term = createTerminal({ cols: 20, rows: 2 });
 			term.write("\x1b[1;31mA\x1b[0mB");
 			const after = term.buffer.active.getLine(0)?.getCell(1);
-			expect(after?.isBold()).toBe(false);
-			expect(after?.isFgDefault()).toBe(true);
+			expect(after?.isBold()).toBe(0);
+			expect(after?.isFgDefault()).toBe(1);
 			term.dispose();
 		});
 	});

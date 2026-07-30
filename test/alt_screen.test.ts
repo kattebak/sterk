@@ -116,7 +116,7 @@ describe("Alternate screen buffer", () => {
 			// Get the cell attributes
 			let line = term.buffer.active.getLine(0);
 			let cell = line?.getCell(0);
-			expect(cell?.isBold()).toBe(true);
+			expect(cell?.isBold()).toBe(1);
 			expect(cell?.getFgColor()).toBe(1); // Red
 
 			// Save cursor (with attributes) - cursor is now at (1, 0)
@@ -126,8 +126,8 @@ describe("Alternate screen buffer", () => {
 			term.write("\x1b[0mB");
 			line = term.buffer.active.getLine(0);
 			cell = line?.getCell(1);
-			expect(cell?.isBold()).toBe(false);
-			expect(cell?.isFgDefault()).toBe(true);
+			expect(cell?.isBold()).toBe(0);
+			expect(cell?.isFgDefault()).toBe(1);
 
 			// Restore cursor (should restore to (1, 0) with attributes)
 			term.write("\x1b[?1048l");
@@ -136,7 +136,7 @@ describe("Alternate screen buffer", () => {
 			// The newly written char should have restored attributes
 			line = term.buffer.active.getLine(0);
 			cell = line?.getCell(1); // Check position 1, not 2
-			expect(cell?.isBold()).toBe(true);
+			expect(cell?.isBold()).toBe(1);
 			expect(cell?.getFgColor()).toBe(1);
 
 			term.dispose();
@@ -268,7 +268,7 @@ describe("Alternate screen buffer", () => {
 
 			let line = term.buffer.active.getLine(0);
 			let cell = line?.getCell(0);
-			expect(cell?.isItalic()).toBe(true);
+			expect(cell?.isItalic()).toBe(1);
 			expect(cell?.getBgColor()).toBe(4); // Blue
 
 			// Save cursor (ESC 7) - cursor is now at (1, 0)
@@ -284,7 +284,7 @@ describe("Alternate screen buffer", () => {
 			// Check restored attributes
 			line = term.buffer.active.getLine(0);
 			cell = line?.getCell(1); // Check position 1, not 2
-			expect(cell?.isItalic()).toBe(true);
+			expect(cell?.isItalic()).toBe(1);
 			expect(cell?.getBgColor()).toBe(4);
 
 			term.dispose();

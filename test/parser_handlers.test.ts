@@ -62,7 +62,7 @@ describe("Parser handler registration (xterm IParser parity)", () => {
 			term.write("\x1b[1mA");
 
 			expect(handler).toHaveBeenCalledTimes(1);
-			expect(term.buffer.active.getLine(0)?.getCell(0).isBold()).toBe(true);
+			expect(term.buffer.active.getLine(0)?.getCell(0).isBold()).toBe(1);
 			term.dispose();
 		});
 
@@ -73,7 +73,7 @@ describe("Parser handler registration (xterm IParser parity)", () => {
 			term.write("\x1b[1mA");
 
 			// Handler consumed the SGR, so bold was never applied.
-			expect(term.buffer.active.getLine(0)?.getCell(0).isBold()).toBe(false);
+			expect(term.buffer.active.getLine(0)?.getCell(0).isBold()).toBe(0);
 			term.dispose();
 		});
 
@@ -139,7 +139,7 @@ describe("Parser handler registration (xterm IParser parity)", () => {
 
 			expect(handler).toHaveBeenCalledTimes(1);
 			// Default SGR still applied this dispatch (promise not awaited inline).
-			expect(term.buffer.active.getLine(0)?.getCell(0).isBold()).toBe(true);
+			expect(term.buffer.active.getLine(0)?.getCell(0).isBold()).toBe(1);
 			term.dispose();
 		});
 	});

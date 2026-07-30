@@ -25,7 +25,7 @@ describe("ScrollBuffer", () => {
 		it("initializes with blank lines", () => {
 			for (let y = 0; y < 24; y++) {
 				const line = buffer.getLine(y);
-				expect(line).not.toBeNull();
+				expect(line).not.toBeUndefined();
 				expect(line?.translateToString()).toBe(" ".repeat(80));
 			}
 		});
@@ -92,15 +92,15 @@ describe("ScrollBuffer", () => {
 			const cell = buffer.getLine(0)?.getCell(0);
 
 			expect(cell?.getChars()).toBe("X");
-			expect(cell?.isFgPalette()).toBe(true);
+			expect(cell?.isFgPalette()).toBe(1);
 			expect(cell?.getFgColor()).toBe(196);
-			expect(cell?.isBgPalette()).toBe(true);
+			expect(cell?.isBgPalette()).toBe(1);
 			expect(cell?.getBgColor()).toBe(21);
-			expect(cell?.isBold()).toBe(true);
-			expect(cell?.isItalic()).toBe(true);
-			expect(cell?.isUnderline()).toBe(true);
-			expect(cell?.isInverse()).toBe(false);
-			expect(cell?.isDim()).toBe(false);
+			expect(cell?.isBold()).toBe(1);
+			expect(cell?.isItalic()).toBe(1);
+			expect(cell?.isUnderline()).toBe(1);
+			expect(cell?.isInverse()).toBe(0);
+			expect(cell?.isDim()).toBe(0);
 		});
 
 		it("handles RGB colors", () => {
@@ -120,9 +120,9 @@ describe("ScrollBuffer", () => {
 			buffer.writeCell("Y", 89, attrs);
 			const cell = buffer.getLine(0)?.getCell(0);
 
-			expect(cell?.isFgRGB()).toBe(true);
+			expect(cell?.isFgRGB()).toBe(1);
 			expect(cell?.getFgColor()).toBe(0xff5500);
-			expect(cell?.isBgRGB()).toBe(true);
+			expect(cell?.isBgRGB()).toBe(1);
 			expect(cell?.getBgColor()).toBe(0x1e1e1e);
 		});
 
@@ -131,9 +131,9 @@ describe("ScrollBuffer", () => {
 			buffer.writeCell("Z", 90, DEFAULT_CELL_ATTRIBUTES);
 			const cell = buffer.getLine(0)?.getCell(0);
 
-			expect(cell?.isFgDefault()).toBe(true);
+			expect(cell?.isFgDefault()).toBe(1);
 			expect(cell?.getFgColor()).toBe(-1);
-			expect(cell?.isBgDefault()).toBe(true);
+			expect(cell?.isBgDefault()).toBe(1);
 			expect(cell?.getBgColor()).toBe(-1);
 		});
 	});
@@ -378,11 +378,11 @@ describe("ScrollBuffer", () => {
 			buffer.writeCell("S", 83, attrs);
 			const cell = buffer.getLine(0)?.getCell(0);
 
-			expect(cell?.isBold()).toBe(true);
-			expect(cell?.isItalic()).toBe(true);
-			expect(cell?.isUnderline()).toBe(true);
-			expect(cell?.isInverse()).toBe(true);
-			expect(cell?.isDim()).toBe(true);
+			expect(cell?.isBold()).toBe(1);
+			expect(cell?.isItalic()).toBe(1);
+			expect(cell?.isUnderline()).toBe(1);
+			expect(cell?.isInverse()).toBe(1);
+			expect(cell?.isDim()).toBe(1);
 		});
 	});
 
@@ -405,12 +405,12 @@ describe("ScrollBuffer", () => {
 
 		it("handles reading line beyond buffer length", () => {
 			const line = buffer.getLine(9999);
-			expect(line).toBeNull();
+			expect(line).toBeUndefined();
 		});
 
 		it("handles negative line index", () => {
 			const line = buffer.getLine(-1);
-			expect(line).toBeNull();
+			expect(line).toBeUndefined();
 		});
 
 		it("maintains baseY correctly during scrollback accumulation", () => {

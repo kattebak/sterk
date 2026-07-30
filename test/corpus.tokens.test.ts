@@ -120,18 +120,18 @@ describe("Corpus token/cell snapshot gate", () => {
 			const redSpace = line.getCell(6);
 			expect(greenSpace.getChars()).toBe(" ");
 			expect(redSpace.getChars()).toBe(" ");
-			expect(greenSpace.isBgDefault()).toBe(false);
-			expect(greenSpace.isBgPalette()).toBe(true);
+			expect(greenSpace.isBgDefault()).toBe(0);
+			expect(greenSpace.isBgPalette()).toBe(1);
 			expect(greenSpace.getBgColor()).toBe(2); // ANSI green
-			expect(redSpace.isBgDefault()).toBe(false);
-			expect(redSpace.isBgPalette()).toBe(true);
+			expect(redSpace.isBgDefault()).toBe(0);
+			expect(redSpace.isBgPalette()).toBe(1);
 			expect(redSpace.getBgColor()).toBe(1); // ANSI red
 
 			// There are no plain inter-word spaces on THIS line (every space is
 			// colored), so verify the surrounding word cells stay default-bg.
-			expect(line.getCell(0).isBgDefault()).toBe(true); // 'o'
-			expect(line.getCell(5).isBgDefault()).toBe(true); // '+'
-			expect(line.getCell(7).isBgDefault()).toBe(true); // 'w'
+			expect(line.getCell(0).isBgDefault()).toBe(1); // 'o'
+			expect(line.getCell(5).isBgDefault()).toBe(1); // '+'
+			expect(line.getCell(7).isBgDefault()).toBe(1); // 'w'
 
 			// Token-level: the colored space tokens must contain a sterk-bg class,
 			// and tokens for default-bg text must NOT.
@@ -173,9 +173,9 @@ describe("Corpus token/cell snapshot gate", () => {
 			if (!line) throw new Error("no exit line");
 			for (let x = 0; x < "exit code 0".length; x++) {
 				const cell = line.getCell(x);
-				expect(cell.isFgDefault()).toBe(true);
-				expect(cell.isBgDefault()).toBe(true);
-				expect(cell.isBold()).toBe(false);
+				expect(cell.isFgDefault()).toBe(1);
+				expect(cell.isBgDefault()).toBe(1);
+				expect(cell.isBold()).toBe(0);
 			}
 
 			// Token/document parity for this clean line.

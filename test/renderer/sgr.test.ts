@@ -42,7 +42,7 @@ describe("SGR rendering", () => {
 
 			// First cell should have red foreground (palette 1)
 			const cell = line?.getCell(0);
-			expect(cell?.isFgPalette()).toBe(true);
+			expect(cell?.isFgPalette()).toBe(1);
 			expect(cell?.getFgColor()).toBe(1); // ANSI red is palette index 1
 		});
 
@@ -57,7 +57,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isBgPalette()).toBe(true);
+			expect(cell?.isBgPalette()).toBe(1);
 			expect(cell?.getBgColor()).toBe(4); // ANSI blue is palette index 4
 		});
 
@@ -72,7 +72,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isFgPalette()).toBe(true);
+			expect(cell?.isFgPalette()).toBe(1);
 			expect(cell?.getFgColor()).toBe(9); // Bright red is palette index 9
 		});
 
@@ -88,12 +88,12 @@ describe("SGR rendering", () => {
 
 			// First cell (R) should be red
 			const redCell = line?.getCell(0);
-			expect(redCell?.isFgPalette()).toBe(true);
+			expect(redCell?.isFgPalette()).toBe(1);
 			expect(redCell?.getFgColor()).toBe(1);
 
 			// Cell after reset (N) should be default
 			const normalCell = line?.getCell(3);
-			expect(normalCell?.isFgDefault()).toBe(true);
+			expect(normalCell?.isFgDefault()).toBe(1);
 		});
 	});
 
@@ -109,7 +109,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isFgPalette()).toBe(true);
+			expect(cell?.isFgPalette()).toBe(1);
 			expect(cell?.getFgColor()).toBe(202);
 		});
 
@@ -124,7 +124,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isBgPalette()).toBe(true);
+			expect(cell?.isBgPalette()).toBe(1);
 			expect(cell?.getBgColor()).toBe(53);
 		});
 	});
@@ -141,7 +141,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isFgRGB()).toBe(true);
+			expect(cell?.isFgRGB()).toBe(1);
 			expect(cell?.getFgColor()).toBe(0xff8000); // 0xFF8000 = RGB(255, 128, 0)
 		});
 
@@ -156,7 +156,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isBgRGB()).toBe(true);
+			expect(cell?.isBgRGB()).toBe(1);
 			expect(cell?.getBgColor()).toBe(0x4080c0); // 0x4080C0 = RGB(64, 128, 192)
 		});
 
@@ -173,7 +173,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isFgRGB()).toBe(true);
+			expect(cell?.isFgRGB()).toBe(1);
 			expect(cell?.getFgColor()).toBe(0xff0000);
 
 			// Note: CSS injection is async via scheduleUpdate()/requestAnimationFrame.
@@ -193,7 +193,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isBold()).toBe(true);
+			expect(cell?.isBold()).toBe(1);
 		});
 
 		it("renders italic (SGR 3)", () => {
@@ -206,7 +206,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isItalic()).toBe(true);
+			expect(cell?.isItalic()).toBe(1);
 		});
 
 		it("renders underline (SGR 4)", () => {
@@ -219,7 +219,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isUnderline()).toBe(true);
+			expect(cell?.isUnderline()).toBe(1);
 		});
 
 		it("renders dim (SGR 2)", () => {
@@ -232,7 +232,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isDim()).toBe(true);
+			expect(cell?.isDim()).toBe(1);
 		});
 
 		it("combines multiple attributes", () => {
@@ -246,10 +246,10 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isBold()).toBe(true);
-			expect(cell?.isItalic()).toBe(true);
-			expect(cell?.isUnderline()).toBe(true);
-			expect(cell?.isFgPalette()).toBe(true);
+			expect(cell?.isBold()).toBe(1);
+			expect(cell?.isItalic()).toBe(1);
+			expect(cell?.isUnderline()).toBe(1);
+			expect(cell?.isFgPalette()).toBe(1);
 			expect(cell?.getFgColor()).toBe(1); // Red
 		});
 	});
@@ -265,7 +265,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const cell = line?.getCell(0);
 
-			expect(cell?.isInverse()).toBe(true);
+			expect(cell?.isInverse()).toBe(1);
 		});
 
 		it("swaps fg/bg colors when inverse is set", () => {
@@ -280,7 +280,7 @@ describe("SGR rendering", () => {
 			const cell = line?.getCell(0);
 
 			// Cell stores the original colors, but renderer should swap them
-			expect(cell?.isInverse()).toBe(true);
+			expect(cell?.isInverse()).toBe(1);
 			expect(cell?.getFgColor()).toBe(1); // Red (stored)
 			expect(cell?.getBgColor()).toBe(4); // Blue (stored)
 
@@ -347,15 +347,15 @@ describe("SGR rendering", () => {
 
 			// First file should be bold + blue (palette 4)
 			const file1Cell = line?.getCell(0);
-			expect(file1Cell?.isBold()).toBe(true);
-			expect(file1Cell?.isFgPalette()).toBe(true);
+			expect(file1Cell?.isBold()).toBe(1);
+			expect(file1Cell?.isFgPalette()).toBe(1);
 			expect(file1Cell?.getFgColor()).toBe(4); // Blue (SGR 34)
 
 			// Script should be bold + green (palette 2)
 			const scriptPos = "file1.txt  file2.txt  ".length;
 			const scriptCell = line?.getCell(scriptPos);
-			expect(scriptCell?.isBold()).toBe(true);
-			expect(scriptCell?.isFgPalette()).toBe(true);
+			expect(scriptCell?.isBold()).toBe(1);
+			expect(scriptCell?.isFgPalette()).toBe(1);
 			expect(scriptCell?.getFgColor()).toBe(2); // Green (SGR 32)
 		});
 
@@ -370,7 +370,7 @@ describe("SGR rendering", () => {
 			const line = buffer.getLine(0);
 			const promptCell = line?.getCell(0);
 
-			expect(promptCell?.isFgPalette()).toBe(true);
+			expect(promptCell?.isFgPalette()).toBe(1);
 			expect(promptCell?.getFgColor()).toBe(2); // Green
 		});
 	});
