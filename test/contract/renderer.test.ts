@@ -98,7 +98,7 @@ describe("contract: renderer", () => {
 		it("buffer cursorX / cursorY advance to match the rendered position after writes", () => {
 			term = createTerminal({ cols: 20, rows: 5 });
 			term.open?.(container);
-			term.write("abc\ndef");
+			term.write("abc\r\ndef");
 			// The buffer-side cursor is the source of truth; the Ace caret
 			// is synced on the next rAF. The contract here is that the
 			// terminal knows where the cursor *should* be — the visual
@@ -119,7 +119,7 @@ describe("contract: renderer", () => {
 			term = createTerminal({ cols: 40, rows: 24 });
 			term.open?.(container);
 			let burst = "";
-			for (let i = 0; i < 120; i++) burst += `line ${i}\n`;
+			for (let i = 0; i < 120; i++) burst += `line ${i}\r\n`;
 			term.write(burst);
 			// All lines must be present in the buffer (refresh is async,
 			// but parsing into the buffer is synchronous).

@@ -596,6 +596,23 @@ export class ScrollBuffer implements Buffer {
 		anchor.chars += ch;
 	}
 
+	/**
+	 * True while the cursor sits on the last column after printing there;
+	 * the next printable character wraps to the next line first.
+	 */
+	get isWrapPending(): boolean {
+		return this.wrapPending;
+	}
+
+	/**
+	 * First column an erase "from the cursor" (EL 0, ED 0) clears. While a
+	 * wrap is pending the cursor counts as past the last column, so the
+	 * character already printed there survives (xterm.js behaviour).
+	 */
+	get eraseFromX(): number {
+		return this.wrapPending ? this.cols : this._cursorX;
+	}
+
 	/** Cursor row relative to the top of the live screen (0-based). */
 	get screenCursorY(): number {
 		return this._cursorY - this.liveTop;
@@ -727,15 +744,15 @@ export class ScrollBuffer implements Buffer {
 		const wasAtBottom = this._viewportY === this.liveTop;
 		const live = this.liveTop;
 		if (feedsScrollback && top === 0) {
-			this.lines.splice(live + bottom + 1, 0, createBlankLine(this.cols));
+			this.insertBlankLineAt(live + bottom + 1);
 			if (this.lines.length > this.maxLines) {
 				this.lines.shift();
 				this._baseY++;
 				this.pruneScrolledOutMarkers();
 			}
 		} else {
-			this.lines.splice(live + top, 1);
-			this.lines.splice(live + bottom, 0, createBlankLine(this.cols));
+			this.removeLineAt(live + top);
+			this.insertBlankLineAt(live + bottom);
 		}
 		this._cursorY = this.liveTop + row;
 		if (wasAtBottom) {
@@ -746,8 +763,39 @@ export class ScrollBuffer implements Buffer {
 	/** Scroll live-screen rows `top..bottom` down one line. */
 	private scrollRegionDown(top: number, bottom: number): void {
 		const live = this.liveTop;
-		this.lines.splice(live + bottom, 1);
-		this.lines.splice(live + top, 0, createBlankLine(this.cols));
+		this.removeLineAt(live + bottom);
+		this.insertBlankLineAt(live + top);
+	}
+
+	/**
+	 * Remove the line at buffer index `index`. Markers below it move up with
+	 * their lines; markers on it are disposed.
+	 */
+	private removeLineAt(index: number): void {
+		this.lines.splice(index, 1);
+		const row = this._baseY + index;
+		const evicted: MarkerAnchor[] = [];
+		this.markerAnchors = this.markerAnchors.filter((anchor) => {
+			if (anchor.absoluteRow === row) {
+				evicted.push(anchor);
+				return false;
+			}
+			if (anchor.absoluteRow > row) anchor.absoluteRow--;
+			return true;
+		});
+		for (const anchor of evicted) anchor.onScrolledOut();
+	}
+
+	/**
+	 * Insert a blank line at buffer index `index`; markers at or below it
+	 * move down with their lines.
+	 */
+	private insertBlankLineAt(index: number): void {
+		this.lines.splice(index, 0, createBlankLine(this.cols));
+		const row = this._baseY + index;
+		for (const anchor of this.markerAnchors) {
+			if (anchor.absoluteRow >= row) anchor.absoluteRow++;
+		}
 	}
 
 	/**
@@ -818,6 +866,8 @@ export class ScrollBuffer implements Buffer {
 	resize(cols: number, rows: number): void {
 		if (cols === this.cols && rows === this.rows) return;
 		const wasAtBottom = this._viewportY === this.liveTop;
+		const oldCols = this.cols;
+		const wasWrapPending = this.wrapPending;
 
 		for (const line of this.lines) {
 			if (line.cells.length > cols) {
@@ -832,7 +882,7 @@ export class ScrollBuffer implements Buffer {
 		if (rows < this.rows) {
 			let surplus = this.rows - rows;
 			while (surplus > 0 && this.lines.length - 1 > this._cursorY) {
-				this.lines.pop();
+				this.removeLineAt(this.lines.length - 1);
 				surplus--;
 			}
 		}
@@ -858,6 +908,9 @@ export class ScrollBuffer implements Buffer {
 			Math.min(this._cursorY, this.lines.length - 1),
 		);
 		this.wrapPending = false;
+		if (wasWrapPending && cols > oldCols) {
+			this._cursorX = oldCols;
+		}
 		this.scrollTop = 0;
 		this.scrollBottom = rows - 1;
 

@@ -76,6 +76,15 @@ test("scroll region on the alternate screen keeps the status line and scrollback
 	expect(rows).toBeGreaterThan(3);
 	expect(rows - 1).toBeLessThanOrEqual(ROUNDS * LINES_PER_ROUND);
 
+	const shellLines = Array.from(
+		{ length: rows * 2 },
+		(_, i) => `shell-${i.toString().padStart(3, "0")}`,
+	);
+	await feedRaw(page, `${shellLines.join("\r\n")}\r\n`);
+	const before = await dumpState(page);
+	const scrollbackBefore = before.lines.slice(0, before.length - before.rows);
+	expect(scrollbackBefore.length).toBeGreaterThan(0);
+
 	await feedRaw(
 		page,
 		`\x1b[?1049h\x1b[H\x1b[2J\x1b[${rows};1H${STATUS}\x1b[1;${rows - 1}r\x1b[${rows - 1};1H`,
@@ -101,6 +110,10 @@ test("scroll region on the alternate screen keeps the status line and scrollback
 
 	await feedRaw(page, "\x1b[r\x1b[?1049l");
 	const normal = await dumpState(page);
-	expect(normal.length).toBe(rows);
+	const scrollbackAfter = normal.lines.slice(0, normal.length - normal.rows);
+	expect(scrollbackAfter).toEqual(scrollbackBefore);
+	expect(scrollbackAfter.filter((l) => /^r\d-line-|STATUS/.test(l))).toEqual(
+		[],
+	);
 	expect(normal.lines.filter((l) => /^r\d-line-/.test(l))).toEqual([]);
 });

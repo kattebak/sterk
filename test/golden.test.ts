@@ -294,7 +294,7 @@ describe("Golden tests", () => {
 	describe("Erase sequences", () => {
 		it("handles ED 0 (erase below cursor)", () => {
 			const term = createTerminal({ cols: 10, rows: 5 });
-			term.write("AAAA\nBBBB\nCCCC\nDDDD");
+			term.write("AAAA\r\nBBBB\r\nCCCC\r\nDDDD");
 			term.write("\x1b[2;2H"); // Move to row 2, col 2
 			term.write("\x1b[0J"); // Erase below
 
@@ -366,7 +366,7 @@ describe("Golden tests", () => {
 
 		it("scrolls when at bottom", () => {
 			const term = createTerminal({ cols: 10, rows: 3 });
-			term.write("Line 1\nLine 2\nLine 3\nLine 4");
+			term.write("Line 1\r\nLine 2\r\nLine 3\r\nLine 4");
 
 			const buffer = term.buffer.active;
 			expect(buffer.length).toBeGreaterThan(3); // Scrollback accumulated

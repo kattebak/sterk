@@ -212,8 +212,8 @@ describe("Alternate screen renderer", () => {
 		term.open?.(container);
 
 		// Write to normal buffer
-		term.write("Persistent normal content\n");
-		term.write("Line 2\n");
+		term.write("Persistent normal content\r\n");
+		term.write("Line 2\r\n");
 
 		return new Promise<void>((resolve) => {
 			setTimeout(() => {

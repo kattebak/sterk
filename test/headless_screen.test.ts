@@ -256,16 +256,16 @@ describe("device query replies", () => {
 			},
 		});
 		expect(replies(term, "\x1b]10;?\x07")).toEqual([
-			"\x1b]10;rgb:1111/2222/3333\x1b\\",
+			"\x1b]10;rgb:1111/2222/3333\x07",
 		]);
 		expect(replies(term, "\x1b]11;?\x1b\\")).toEqual([
 			"\x1b]11;rgb:4444/5555/6666\x1b\\",
 		]);
 		expect(replies(term, "\x1b]12;?\x07")).toEqual([
-			"\x1b]12;rgb:7777/8888/9999\x1b\\",
+			"\x1b]12;rgb:7777/8888/9999\x07",
 		]);
 		expect(replies(term, "\x1b]4;1;?\x07")).toEqual([
-			"\x1b]4;1;rgb:abab/cdcd/efef\x1b\\",
+			"\x1b]4;1;rgb:abab/cdcd/efef\x07",
 		]);
 	});
 

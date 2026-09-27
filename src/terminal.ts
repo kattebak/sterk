@@ -90,8 +90,8 @@ class ParserImpl implements Parser {
 	}
 }
 
-function paletteColor(theme: Theme, index: number): string {
-	return resolveThemePalette(theme)[index] ?? DEFAULT_THEME.foreground;
+function paletteColor(theme: Theme, index: number): string | undefined {
+	return resolveThemePalette(theme)[index];
 }
 
 function parseColor(color: string): [number, number, number] | null {
@@ -120,12 +120,12 @@ function parseColor(color: string): [number, number, number] | null {
 
 /**
  * Format a CSS colour as the X11 `rgb:rrrr/gggg/bbbb` spec xterm uses in
- * colour-query replies. Colours sterk cannot parse fall back to the
- * default foreground.
+ * colour-query replies, or `null` for a colour sterk cannot parse (named
+ * colours, alpha forms, `transparent`) so no wrong colour is reported.
  */
-function xtermColorSpec(color: string): string {
-	const rgb = parseColor(color) ??
-		parseColor(DEFAULT_THEME.foreground) ?? [0, 0, 0];
+function xtermColorSpec(color: string | undefined): string | null {
+	const rgb = color === undefined ? null : parseColor(color);
+	if (!rgb) return null;
 	return `rgb:${rgb.map((c) => (c * 257).toString(16).padStart(4, "0")).join("/")}`;
 }
 
@@ -247,8 +247,8 @@ export class TerminalImpl implements Terminal {
 				intermediates: number[],
 				final: number,
 			) => this.handleCsiDispatch(params, intermediates, final),
-			oscDispatch: (id: number, data: string) =>
-				this.handleOscDispatch(id, data),
+			oscDispatch: (id: number, data: string, terminator: string) =>
+				this.handleOscDispatch(id, data, terminator),
 			put: (_code: number) => {
 				/* Not used in basic implementation */
 			},
@@ -304,19 +304,7 @@ export class TerminalImpl implements Terminal {
 		const beforeCursorY = this.scrollBuffer.cursorY;
 		const beforeViewportY = this.scrollBuffer.viewportY;
 
-		// convertEol: treat a bare `\n` (LF) as `\r\n` (CRLF) so Unix-style
-		// line endings land at the start of the next row instead of stair-
-		// stepping. We only rewrite LFs that aren't already preceded by a CR,
-		// so existing CRLFs are untouched. Decode bytes to a string first so
-		// the rewrite is uniform across both input shapes.
-		let payload: string | Uint8Array = data;
-		if (this._options.convertEol) {
-			const str =
-				typeof data === "string" ? data : new TextDecoder().decode(data);
-			payload = str.replace(/(?<!\r)\n/g, "\r\n");
-		}
-
-		this.vtParser.write(payload);
+		this.vtParser.write(data);
 		if (this.aceRenderer) {
 			this.aceRenderer.scheduleUpdate();
 		}
@@ -1179,6 +1167,7 @@ export class TerminalImpl implements Terminal {
 				break;
 
 			case 0x09: // HT (horizontal tab)
+				if (buf.isWrapPending) break;
 				{
 					const nextTab = Math.floor((buf.cursorX + 8) / 8) * 8;
 					buf.setCursor(Math.min(nextTab, this.cols - 1), buf.cursorY);
@@ -1194,10 +1183,12 @@ export class TerminalImpl implements Terminal {
 				if (code === 0x0a) {
 					this.emitter.emit("line-feed");
 				}
-				// LF also returns the carriage (newline mode), so a bare `\n`
-				// starts the next row at column 0.
+				// LF moves down in the same column; `convertEol` makes it
+				// return the carriage as well.
 				buf.index();
-				buf.setScreenCursor(0, buf.screenCursorY);
+				if (this._options.convertEol) {
+					buf.setScreenCursor(0, buf.screenCursorY);
+				}
 				break;
 
 			case 0x0d: // CR (carriage return)
@@ -1367,7 +1358,7 @@ export class TerminalImpl implements Terminal {
 		if (!plain && !dec) return;
 		const buf = this.scrollBuffer;
 		const row = buf.screenCursorY + 1;
-		const col = buf.cursorX + 1;
+		const col = buf.cursorX + (buf.isWrapPending ? 2 : 1);
 		if (kind === 5 && plain) {
 			this.reply("\x1b[0n");
 			return;
@@ -1384,7 +1375,11 @@ export class TerminalImpl implements Terminal {
 	/**
 	 * Handle OSC sequences
 	 */
-	private handleOscDispatch(id: number, data: string): void {
+	private handleOscDispatch(
+		id: number,
+		data: string,
+		terminator: string,
+	): void {
 		// OSC 0 (icon name + window title) and OSC 2 (window title) carry the
 		// terminal title string. Emit onTitleChange for both, matching
 		// xterm.js. Consumer-registered OSC handlers (including OSC 133) are
@@ -1394,16 +1389,20 @@ export class TerminalImpl implements Terminal {
 			return;
 		}
 		if (id === 4) {
-			this.answerPaletteQuery(data);
+			this.answerPaletteQuery(data, terminator);
 			return;
 		}
 		if (id === 10 || id === 11 || id === 12) {
-			this.answerDynamicColorQuery(id, data);
+			this.answerDynamicColorQuery(id, data, terminator);
 		}
 	}
 
 	/** OSC 10/11/12 `?`: report foreground, background or cursor colour. */
-	private answerDynamicColorQuery(id: number, data: string): void {
+	private answerDynamicColorQuery(
+		id: number,
+		data: string,
+		terminator: string,
+	): void {
 		const theme = this._options.theme;
 		const colors = [
 			theme.foreground ?? DEFAULT_THEME.foreground,
@@ -1413,20 +1412,23 @@ export class TerminalImpl implements Terminal {
 		const queries = data.split(";");
 		queries.forEach((query, i) => {
 			const color = colors[id - 10 + i];
-			if (query !== "?" || color === undefined) return;
-			this.reply(`\x1b]${id + i};${xtermColorSpec(color)}\x1b\\`);
+			if (query !== "?") return;
+			const spec = xtermColorSpec(color);
+			if (spec === null) return;
+			this.reply(`\x1b]${id + i};${spec}${terminator}`);
 		});
 	}
 
 	/** OSC 4 `index;?` pairs: report the palette entry for each index. */
-	private answerPaletteQuery(data: string): void {
+	private answerPaletteQuery(data: string, terminator: string): void {
 		const parts = data.split(";");
 		for (let i = 0; i + 1 < parts.length; i += 2) {
 			const index = Number(parts[i]);
 			if (parts[i + 1] !== "?" || !Number.isInteger(index)) continue;
 			if (index < 0 || index > 255) continue;
-			const color = paletteColor(this._options.theme, index);
-			this.reply(`\x1b]4;${index};${xtermColorSpec(color)}\x1b\\`);
+			const spec = xtermColorSpec(paletteColor(this._options.theme, index));
+			if (spec === null) continue;
+			this.reply(`\x1b]4;${index};${spec}${terminator}`);
 		}
 	}
 
@@ -1440,7 +1442,7 @@ export class TerminalImpl implements Terminal {
 		const row = buf.screenCursorY;
 		switch (mode) {
 			case 0:
-				buf.eraseScreenRow(row, buf.cursorX);
+				buf.eraseScreenRow(row, buf.eraseFromX);
 				for (let y = row + 1; y < this.rows; y++) buf.eraseScreenRow(y);
 				break;
 			case 1:
@@ -1467,7 +1469,7 @@ export class TerminalImpl implements Terminal {
 		const row = buf.screenCursorY;
 		switch (mode) {
 			case 0:
-				buf.eraseScreenRow(row, buf.cursorX);
+				buf.eraseScreenRow(row, buf.eraseFromX);
 				break;
 			case 1:
 				buf.eraseScreenRow(row, 0, buf.cursorX);
