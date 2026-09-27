@@ -295,6 +295,10 @@ export class ScrollBuffer implements Buffer {
 	private _cursorX = 0;
 	/** Cursor Y position (row, relative to viewport) */
 	private _cursorY = 0;
+	private scrollback: number;
+	private scrollTop = 0;
+	private scrollBottom: number;
+	private wrapPending = false;
 
 	/**
 	 * Live marker anchors. Each anchor pins itself to a buffer ABSOLUTE row
@@ -318,7 +322,9 @@ export class ScrollBuffer implements Buffer {
 		this.cols = cols;
 		this.rows = rows;
 		this._type = type;
+		this.scrollback = scrollback;
 		this.maxLines = rows + scrollback;
+		this.scrollBottom = rows - 1;
 
 		// Initialize with blank lines
 		for (let i = 0; i < rows; i++) {
@@ -405,6 +411,7 @@ export class ScrollBuffer implements Buffer {
 		// Allow cursor beyond viewport when buffer has scrollback
 		const maxY = Math.max(this.rows - 1, this.lines.length - 1);
 		this._cursorY = Math.max(0, Math.min(y, maxY));
+		this.wrapPending = false;
 	}
 
 	/**
@@ -481,170 +488,296 @@ export class ScrollBuffer implements Buffer {
 
 	/**
 	 * Write a single-cell (width-1) character at the cursor position with
-	 * the given attributes. Used by the parser/terminal for ASCII writes
-	 * and by control sequences that need to drop a blank or sentinel cell
-	 * (e.g. erase-line emitting " "). Wide and combining code points must
-	 * go through `printCodePoint` so width is honoured.
+	 * the given attributes, honouring deferred autowrap. Wide and combining
+	 * code points must go through `printCodePoint` so width is honoured.
 	 *
 	 * @param char - Character to write (assumed single column)
 	 * @param code - Unicode code point
 	 * @param attrs - SGR attributes
 	 */
 	writeCell(char: string, code: number, attrs: CellAttributes): void {
-		this.placeCell(char, code, attrs, false);
-		this.advanceCursor(1);
+		this.printCell(char, code, attrs, 1);
 	}
 
 	/**
 	 * Print a Unicode code point at the cursor, honouring its column
-	 * width as determined by `wcwidth()`. Routes:
+	 * width as determined by `wcwidth()`:
 	 *
-	 *  - width 1 → single normal cell, cursor advances by 1
-	 *  - width 2 → leading cell holds the glyph, trailing cell is a
-	 *    `isPlaceholder: true` cell with `chars: ""` and `code: 0`;
-	 *    cursor advances by 2. If only one column remains on the line
-	 *    we wrap to the next line (xterm-style) so the glyph stays
-	 *    contiguous.
-	 *  - width 0 (combining mark) → append the code point's char to the
-	 *    *previous* cell's `chars` buffer without advancing the cursor.
-	 *    If there is no previous cell on this line (cursor at column 0
-	 *    or previous cell is a placeholder), Kuhn's spec says to drop
-	 *    the combining mark; we follow that.
+	 *  - width 1 → single normal cell
+	 *  - width 2 → leading cell holds the glyph, trailing cell is an
+	 *    `isPlaceholder: true` cell with `chars: ""`; a glyph that does not
+	 *    fit in the remaining columns wraps first so it stays contiguous.
+	 *  - width 0 (combining mark) → appended to the previous cell's `chars`
+	 *    without advancing; dropped when there is no anchor cell.
 	 *  - width -1 (unprintable) → no-op.
 	 *
-	 * This is the parity counterpart to aceterm's `libterm.js:475-491`
-	 * wide-char + combining-mark write path (mobux audit Row 33).
-	 *
-	 * @param ch - The character (1-2 UTF-16 code units representing one code point)
-	 * @param cp - Unicode code point (matches `ch.codePointAt(0)`)
-	 * @param attrs - SGR attributes to bake onto the leading cell
+	 * Writing into the last column leaves the cursor there with a pending
+	 * wrap (DECAWM); the next printable character moves to the next line,
+	 * scrolling the scroll region when the cursor sits on its bottom margin.
 	 */
 	printCodePoint(ch: string, cp: number, attrs: CellAttributes): void {
 		const w = wcwidth(cp);
-
-		if (w < 0) {
-			// Unprintable — drop. (C0/C1 controls are already filtered by
-			// the parser, but a defensive guard keeps callers honest.)
-			return;
-		}
-
+		if (w < 0) return;
 		if (w === 0) {
-			// Combining mark: glue onto the previous cell's character buffer
-			// without advancing the cursor. If there's no anchor cell, the
-			// mark is dropped (Kuhn's behaviour — better than rendering an
-			// orphaned diacritic on its own).
 			this.appendCombiningMark(ch);
 			return;
 		}
-
-		if (w === 2) {
-			// Wide glyph: if only one column remains, wrap to the next row
-			// so the glyph is never split across a line boundary. xterm,
-			// foot, and iTerm all do this.
-			if (this._cursorX >= this.cols - 1) {
-				// Implicit wrap: push to start of next line.
-				this._cursorX = 0;
-				if (this._cursorY < this.rows - 1) {
-					this._cursorY++;
-				}
-				// (If we're already on the last row, the caller's newline
-				// machinery will handle scrolling; we just write at col 0.)
-			}
-			this.placeCell(ch, cp, attrs, false);
-			this.advanceCursor(1);
-			// Trailing placeholder slot.
-			this.placeCell("", 0, attrs, true);
-			this.advanceCursor(1);
-			return;
-		}
-
-		// Default: width-1 cell.
-		this.placeCell(ch, cp, attrs, false);
-		this.advanceCursor(1);
+		this.printCell(ch, cp, attrs, w);
 	}
 
-	/**
-	 * Write the character `ch` into the cell at the current cursor
-	 * position. Does **not** advance the cursor; the caller is
-	 * responsible for advancing in cell-units. Used by both `writeCell`
-	 * (normal path) and `printCodePoint` (wide-char path).
-	 */
+	private printCell(
+		ch: string,
+		code: number,
+		attrs: CellAttributes,
+		width: number,
+	): void {
+		if (this.wrapPending || this._cursorX + width > this.cols) {
+			this.wrapToNextLine();
+		}
+		this.placeCell(this._cursorX, ch, code, attrs, false);
+		if (width === 2 && this._cursorX + 1 < this.cols) {
+			this.placeCell(this._cursorX + 1, "", 0, attrs, true);
+		}
+		const next = this._cursorX + width;
+		if (next >= this.cols) {
+			this._cursorX = this.cols - 1;
+			this.wrapPending = true;
+			return;
+		}
+		this._cursorX = next;
+	}
+
+	private wrapToNextLine(): void {
+		this._cursorX = 0;
+		this.index();
+		const line = this.lines[this._cursorY];
+		if (line) line.isWrapped = true;
+	}
+
 	private placeCell(
+		x: number,
 		ch: string,
 		code: number,
 		attrs: CellAttributes,
 		isPlaceholder: boolean,
 	): void {
-		const relativeY = this._cursorY;
-
-		while (this.lines.length <= relativeY) {
+		while (this.lines.length <= this._cursorY) {
 			this.lines.push(createBlankLine(this.cols));
 		}
-
-		const line = this.lines[relativeY];
+		const line = this.lines[this._cursorY];
 		if (!line) return;
-
-		while (line.cells.length <= this._cursorX) {
+		while (line.cells.length <= x) {
 			line.cells.push(createBlankCell());
 		}
-
-		const cell = line.cells[this._cursorX];
+		const cell = line.cells[x];
 		if (!cell) return;
-
 		cell.chars = ch;
 		cell.code = code;
 		cell.attrs = { ...attrs };
-		if (isPlaceholder) {
-			cell.isPlaceholder = true;
-		} else {
-			// Important: clear any stale placeholder flag from a previous
-			// occupant of this slot. Otherwise overwriting a width-2 trail
-			// with a fresh width-1 glyph would leave the placeholder bit
-			// set and confuse the renderer.
-			cell.isPlaceholder = false;
-		}
+		cell.isPlaceholder = isPlaceholder;
 	}
 
 	/**
-	 * Advance the cursor by `n` cell-units, wrapping at column edge to
-	 * the next row (with viewport clamping). Shared by all write paths
-	 * so wide-char and ASCII cursor math go through one place.
-	 */
-	private advanceCursor(n: number): void {
-		for (let i = 0; i < n; i++) {
-			this._cursorX++;
-			if (this._cursorX >= this.cols) {
-				this._cursorX = 0;
-				this._cursorY = Math.min(this._cursorY + 1, this.rows - 1);
-			}
-		}
-	}
-
-	/**
-	 * Append a zero-width combining mark to the previous cell on the
-	 * current row. If there is no anchor cell (cursor at column 0, or
-	 * previous cell is a width-2 placeholder), the mark is dropped —
-	 * matching Kuhn's POSIX wcwidth contract.
+	 * Append a zero-width combining mark to the cell before the cursor (or
+	 * the cell under it while a wrap is pending). The mark is dropped when
+	 * there is no anchor cell.
 	 */
 	private appendCombiningMark(ch: string): void {
-		if (this._cursorX === 0) return;
-
+		let anchorX = this.wrapPending ? this._cursorX : this._cursorX - 1;
+		if (anchorX < 0) return;
 		const line = this.lines[this._cursorY];
 		if (!line) return;
-
-		// The anchor is the *previous* cell. If that cell is a placeholder
-		// (the trailing half of a width-2 glyph), step back one more so
-		// the combining mark glues onto the leading cell.
-		let anchorX = this._cursorX - 1;
 		let anchor = line.cells[anchorX];
 		if (anchor?.isPlaceholder && anchorX > 0) {
 			anchorX--;
 			anchor = line.cells[anchorX];
 		}
 		if (!anchor || anchor.isPlaceholder) return;
-
 		anchor.chars += ch;
-		// Cursor does *not* advance.
+	}
+
+	/** Cursor row relative to the top of the live screen (0-based). */
+	get screenCursorY(): number {
+		return this._cursorY - this.liveTop;
+	}
+
+	/**
+	 * Move the cursor to a live-screen position. `row` is 0-based and
+	 * relative to the top of the live screen, not to the buffer.
+	 */
+	setScreenCursor(x: number, row: number): void {
+		this._cursorX = Math.max(0, Math.min(x, this.cols - 1));
+		this._cursorY = this.liveTop + Math.max(0, Math.min(row, this.rows - 1));
+		this.wrapPending = false;
+	}
+
+	/** Top margin of the scroll region (0-based live-screen row). */
+	get regionTop(): number {
+		return this.scrollTop;
+	}
+
+	/** Bottom margin of the scroll region (0-based live-screen row, inclusive). */
+	get regionBottom(): number {
+		return this.scrollBottom;
+	}
+
+	/**
+	 * DECSTBM: set the scroll region to live-screen rows `top..bottom`
+	 * (0-based, inclusive) and home the cursor. A region of fewer than two
+	 * rows is ignored.
+	 */
+	setScrollRegion(top: number, bottom: number): void {
+		const clampedBottom = Math.min(bottom, this.rows - 1);
+		if (top < 0 || top >= clampedBottom) return;
+		this.scrollTop = top;
+		this.scrollBottom = clampedBottom;
+		this.setScreenCursor(0, 0);
+	}
+
+	/**
+	 * IND: move the cursor down one row, scrolling the scroll region up when
+	 * the cursor is on its bottom margin. The column is unchanged.
+	 */
+	index(): void {
+		this.wrapPending = false;
+		const row = this.screenCursorY;
+		if (row === this.scrollBottom) {
+			this.scrollRegionUp(this.scrollTop, this.scrollBottom, true);
+			return;
+		}
+		if (row < this.rows - 1) {
+			this._cursorY++;
+		}
+	}
+
+	/**
+	 * RI: move the cursor up one row, scrolling the scroll region down when
+	 * the cursor is on its top margin.
+	 */
+	reverseIndex(): void {
+		this.wrapPending = false;
+		const row = this.screenCursorY;
+		if (row === this.scrollTop) {
+			this.scrollRegionDown(this.scrollTop, this.scrollBottom);
+			return;
+		}
+		if (row > 0) {
+			this._cursorY--;
+		}
+	}
+
+	/** SU: scroll the scroll region up `n` lines; the cursor stays put. */
+	scrollUp(n: number): void {
+		const count = Math.min(n, this.scrollBottom - this.scrollTop + 1);
+		for (let i = 0; i < count; i++) {
+			this.scrollRegionUp(this.scrollTop, this.scrollBottom, false);
+		}
+	}
+
+	/** SD: scroll the scroll region down `n` lines; the cursor stays put. */
+	scrollDown(n: number): void {
+		const count = Math.min(n, this.scrollBottom - this.scrollTop + 1);
+		for (let i = 0; i < count; i++) {
+			this.scrollRegionDown(this.scrollTop, this.scrollBottom);
+		}
+	}
+
+	/**
+	 * IL: insert `n` blank lines at the cursor row, pushing the rows below
+	 * it down within the scroll region. No-op outside the region.
+	 */
+	insertLines(n: number): void {
+		const row = this.screenCursorY;
+		if (row < this.scrollTop || row > this.scrollBottom) return;
+		const count = Math.min(n, this.scrollBottom - row + 1);
+		for (let i = 0; i < count; i++) {
+			this.scrollRegionDown(row, this.scrollBottom);
+		}
+		this._cursorX = 0;
+		this.wrapPending = false;
+	}
+
+	/**
+	 * DL: delete `n` lines at the cursor row, pulling the rows below it up
+	 * within the scroll region. No-op outside the region.
+	 */
+	deleteLines(n: number): void {
+		const row = this.screenCursorY;
+		if (row < this.scrollTop || row > this.scrollBottom) return;
+		const count = Math.min(n, this.scrollBottom - row + 1);
+		for (let i = 0; i < count; i++) {
+			this.scrollRegionUp(row, this.scrollBottom, false);
+		}
+		this._cursorX = 0;
+		this.wrapPending = false;
+	}
+
+	/**
+	 * Scroll live-screen rows `top..bottom` up one line. When the region
+	 * starts at the top of the screen and `feedsScrollback` is set, the top
+	 * row moves into scrollback (dropped on a buffer without scrollback);
+	 * otherwise it is discarded.
+	 */
+	private scrollRegionUp(
+		top: number,
+		bottom: number,
+		feedsScrollback: boolean,
+	): void {
+		const row = this.screenCursorY;
+		const wasAtBottom = this._viewportY === this.liveTop;
+		const live = this.liveTop;
+		if (feedsScrollback && top === 0) {
+			this.lines.splice(live + bottom + 1, 0, createBlankLine(this.cols));
+			if (this.lines.length > this.maxLines) {
+				this.lines.shift();
+				this._baseY++;
+				this.pruneScrolledOutMarkers();
+			}
+		} else {
+			this.lines.splice(live + top, 1);
+			this.lines.splice(live + bottom, 0, createBlankLine(this.cols));
+		}
+		this._cursorY = this.liveTop + row;
+		if (wasAtBottom) {
+			this.scrollToBottom();
+		}
+	}
+
+	/** Scroll live-screen rows `top..bottom` down one line. */
+	private scrollRegionDown(top: number, bottom: number): void {
+		const live = this.liveTop;
+		this.lines.splice(live + bottom, 1);
+		this.lines.splice(live + top, 0, createBlankLine(this.cols));
+	}
+
+	/**
+	 * Blank columns `fromX..toX` (inclusive) of a live-screen row. Clearing a
+	 * whole row also drops its wrapped flag.
+	 */
+	eraseScreenRow(row: number, fromX = 0, toX = this.cols - 1): void {
+		const line = this.lines[this.liveTop + row];
+		if (!line) return;
+		const end = Math.min(toX, line.cells.length - 1);
+		for (let x = Math.max(0, fromX); x <= end; x++) {
+			line.cells[x] = createBlankCell();
+		}
+		if (fromX <= 0 && toX >= this.cols - 1) {
+			line.isWrapped = false;
+		}
+	}
+
+	/**
+	 * ED 3: drop every scrollback line, keeping the live screen and the
+	 * cursor's position on it.
+	 */
+	clearScrollback(): void {
+		const dropped = this.liveTop;
+		if (dropped === 0) return;
+		this.lines.splice(0, dropped);
+		this._baseY += dropped;
+		this._cursorY -= dropped;
+		this._viewportY = 0;
+		this.pruneScrolledOutMarkers();
 	}
 
 	/**
@@ -659,6 +792,9 @@ export class ScrollBuffer implements Buffer {
 		this._viewportY = 0;
 		this._cursorX = 0;
 		this._cursorY = 0;
+		this.wrapPending = false;
+		this.scrollTop = 0;
+		this.scrollBottom = this.rows - 1;
 		// A clear wipes the lines the markers anchored to, so every marker has
 		// effectively scrolled out — notify and drop them all (xterm.js
 		// disposes markers when their line is gone).
@@ -670,17 +806,19 @@ export class ScrollBuffer implements Buffer {
 	}
 
 	/**
-	 * Resize the buffer to new dimensions.
-	 * This is a simplified resize that doesn't reflow content (reflow deferred to M2).
+	 * Resize the buffer without reflowing content. Growing the row count
+	 * pulls scrollback back onto the screen before adding blank rows;
+	 * shrinking it drops blank rows below the cursor first and moves the
+	 * rest of the overflow into scrollback. The scroll region resets to the
+	 * full screen.
 	 *
 	 * @param cols - New column count
 	 * @param rows - New row count
 	 */
 	resize(cols: number, rows: number): void {
-		this.cols = cols;
-		this.rows = rows;
+		if (cols === this.cols && rows === this.rows) return;
+		const wasAtBottom = this._viewportY === this.liveTop;
 
-		// Resize existing lines (truncate or pad)
 		for (const line of this.lines) {
 			if (line.cells.length > cols) {
 				line.cells.length = cols;
@@ -691,11 +829,42 @@ export class ScrollBuffer implements Buffer {
 			}
 		}
 
-		// Clamp cursor position
-		this._cursorX = Math.min(this._cursorX, cols - 1);
-		this._cursorY = Math.min(this._cursorY, rows - 1);
+		if (rows < this.rows) {
+			let surplus = this.rows - rows;
+			while (surplus > 0 && this.lines.length - 1 > this._cursorY) {
+				this.lines.pop();
+				surplus--;
+			}
+		}
 
-		// Update viewport
+		this.cols = cols;
+		this.rows = rows;
+		this.maxLines = rows + this.scrollback;
+
+		while (this.lines.length < rows) {
+			this.lines.push(createBlankLine(cols));
+		}
+		const overflow = this.lines.length - this.maxLines;
+		if (overflow > 0) {
+			this.lines.splice(0, overflow);
+			this._baseY += overflow;
+			this._cursorY -= overflow;
+			this.pruneScrolledOutMarkers();
+		}
+
+		this._cursorX = Math.min(this._cursorX, cols - 1);
+		this._cursorY = Math.max(
+			this.liveTop,
+			Math.min(this._cursorY, this.lines.length - 1),
+		);
+		this.wrapPending = false;
+		this.scrollTop = 0;
+		this.scrollBottom = rows - 1;
+
+		if (wasAtBottom) {
+			this.scrollToBottom();
+			return;
+		}
 		this.setViewportY(this._viewportY);
 	}
 
@@ -773,6 +942,7 @@ export class ScrollBuffer implements Buffer {
  */
 export interface SavedCursor {
 	cursorX: number;
+	/** Row relative to the top of the live screen. */
 	cursorY: number;
 	attrs: CellAttributes;
 }
@@ -868,7 +1038,7 @@ export class BufferNamespaceImpl implements BufferNamespace {
 	saveCursor(attrs: CellAttributes): void {
 		this.savedCursor = {
 			cursorX: this.activeBuffer.cursorX,
-			cursorY: this.activeBuffer.cursorY,
+			cursorY: this.activeBuffer.screenCursorY,
 			attrs: { ...attrs },
 		};
 	}
@@ -879,7 +1049,7 @@ export class BufferNamespaceImpl implements BufferNamespace {
 	 */
 	restoreCursor(attrs: CellAttributes): void {
 		if (this.savedCursor) {
-			this.activeBuffer.setCursor(
+			this.activeBuffer.setScreenCursor(
 				this.savedCursor.cursorX,
 				this.savedCursor.cursorY,
 			);

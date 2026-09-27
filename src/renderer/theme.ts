@@ -29,20 +29,10 @@ export const DEFAULT_THEME: Required<
 };
 
 /**
- * Generate Ace theme CSS from a sterk Theme
- *
- * @param theme - Sterk theme configuration
- * @returns CSS string for Ace theme
+ * The 256-colour palette a theme renders with: the xterm defaults, with the
+ * theme's `palette` entries and named ANSI overrides applied on top.
  */
-export function generateAceThemeCss(theme: Theme = {}): string {
-	const fg = theme.foreground ?? DEFAULT_THEME.foreground;
-	const bg = theme.background ?? DEFAULT_THEME.background;
-	const cursor = theme.cursor ?? DEFAULT_THEME.cursor;
-	const cursorAccent = theme.cursorAccent ?? DEFAULT_THEME.cursorAccent;
-	const selection =
-		theme.selectionBackground ?? DEFAULT_THEME.selectionBackground;
-
-	// Build the 256-color palette, merging theme palette if provided
+export function resolveThemePalette(theme: Theme): string[] {
 	const fullPalette = buildPalette();
 	if (theme.palette) {
 		for (let i = 0; i < Math.min(theme.palette.length, 16); i++) {
@@ -75,6 +65,24 @@ export function generateAceThemeCss(theme: Theme = {}): string {
 	for (const [index, color] of Object.entries(ansiOverrides)) {
 		fullPalette[Number(index)] = color;
 	}
+	return fullPalette;
+}
+
+/**
+ * Generate Ace theme CSS from a sterk Theme
+ *
+ * @param theme - Sterk theme configuration
+ * @returns CSS string for Ace theme
+ */
+export function generateAceThemeCss(theme: Theme = {}): string {
+	const fg = theme.foreground ?? DEFAULT_THEME.foreground;
+	const bg = theme.background ?? DEFAULT_THEME.background;
+	const cursor = theme.cursor ?? DEFAULT_THEME.cursor;
+	const cursorAccent = theme.cursorAccent ?? DEFAULT_THEME.cursorAccent;
+	const selection =
+		theme.selectionBackground ?? DEFAULT_THEME.selectionBackground;
+
+	const fullPalette = resolveThemePalette(theme);
 
 	// Generate CSS custom properties for palette colors
 	const paletteVars = fullPalette

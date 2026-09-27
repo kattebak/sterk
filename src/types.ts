@@ -255,6 +255,18 @@ export interface Terminal {
 	onBell(callback: () => void): Disposable;
 
 	/**
+	 * Register a callback invoked with each reply the terminal sends back to
+	 * the host: device attributes (DA), status and cursor-position reports
+	 * (DSR/CPR), and colour queries (OSC 4, 10, 11, 12). Forward the data to
+	 * the program's input (the pty) so programs that probe the terminal get
+	 * their answer. Replies are not emitted on `onData`.
+	 *
+	 * @param callback - Function receiving the reply bytes
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onReply(callback: (data: string) => void): Disposable;
+
+	/**
 	 * Register a callback invoked when the viewport scroll position changes.
 	 * The callback receives the new top line (absolute row index of the
 	 * topmost visible row, i.e. `viewportY`). Mirrors xterm.js
