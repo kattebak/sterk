@@ -24,10 +24,17 @@ function lineKey(line: ScreenLine): string {
 
 /**
  * Reference {@link ScreenSource} over a sterk terminal, typically a
- * headless one. It diffs the terminal after each parsed write: rows
- * trimmed from the top are read off `baseY`, rows added to the history off
- * its length, and screen rows by comparing each row with the last one it
- * reported. A buffer switch, a resize or a clear is reported as `full`.
+ * headless one. It diffs the terminal after each parsed write: rows added
+ * to the history off its length, and screen rows by comparing each row
+ * with the last one it reported. A buffer switch, a resize or a clear is
+ * reported as `full`.
+ *
+ * Two buffer fields mean something different in sterk than in xterm.js.
+ * Sterk's `baseY` counts the rows dropped from the top, which is the trim
+ * count this source reports; xterm's `baseY` is the history length, so an
+ * xterm source has to count trims another way (xterm markers move up as
+ * rows are trimmed). Sterk's `cursorY` indexes the whole buffer, so the
+ * screen row is `cursorY - (length - rows)`; xterm's is already a screen row.
  */
 export function createTerminalScreenSource(
 	term: Terminal,
@@ -42,9 +49,10 @@ export function createTerminalScreenSource(
 	};
 	const cursor = (): ScreenSource["cursor"] => {
 		const buffer = term.buffer.active;
+		const screenTop = buffer.length - term.rows;
 		return {
 			x: buffer.cursorX,
-			y: buffer.cursorY - (buffer.length - term.rows),
+			y: buffer.cursorY - screenTop,
 			visible: true,
 		};
 	};

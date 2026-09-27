@@ -181,6 +181,28 @@ ${contrastPaletteRules}
   opacity: 0.5 !important;
 }
 
+.ace_editor .ace_sterk-strikethrough {
+  text-decoration: line-through !important;
+}
+
+.ace_editor .ace_sterk-underline.ace_sterk-strikethrough {
+  text-decoration: underline line-through !important;
+}
+
+@keyframes sterk-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.ace_editor .ace_sterk-blink {
+  animation: sterk-blink 1s step-end infinite;
+}
+
+.ace_editor .ace_sterk-invisible {
+  color: transparent !important;
+}
+
 /* Truecolor support: classes are injected dynamically per color */
 `.trim();
 }

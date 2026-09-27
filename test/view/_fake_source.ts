@@ -15,6 +15,9 @@ export const PLAIN: ScreenAttrs = {
 	underline: false,
 	dim: false,
 	inverse: false,
+	invisible: false,
+	strikethrough: false,
+	blink: false,
 };
 
 export function line(

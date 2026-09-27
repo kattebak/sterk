@@ -135,6 +135,9 @@ export function buildCellClassName(
 		underline: cell.isUnderline(),
 		dim: cell.isDim(),
 		inverse: cell.isInverse(),
+		invisible: false,
+		strikethrough: false,
+		blink: false,
 	});
 }
 
@@ -202,6 +205,15 @@ export function buildAttrsClassName(attrs: ScreenAttrs): string {
 	}
 	if (attrs.dim) {
 		classes.push("sterk-dim");
+	}
+	if (attrs.strikethrough) {
+		classes.push("sterk-strikethrough");
+	}
+	if (attrs.blink) {
+		classes.push("sterk-blink");
+	}
+	if (attrs.invisible) {
+		classes.push("sterk-invisible");
 	}
 
 	// Join with `.` (NOT space): Ace's text layer turns the token type into a

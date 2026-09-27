@@ -51,6 +51,23 @@ describe("createTerminalScreenSource", () => {
 		expect(text(source.history.line(0)).trimEnd()).toBe("4");
 	});
 
+	it("reports one trimmed row once the scrollback is full", () => {
+		const term = createTerminal({ cols: 10, rows: 2, scrollback: 3 });
+		term.write("1\r\n2\r\n3\r\n4\r\n5");
+		const { source, changes } = record(term);
+		expect(source.history.length).toBe(3);
+		term.write("\r\n6");
+		expect(changes).toEqual([
+			{
+				history: { removedTop: 1, appended: 1 },
+				screenRows: [0, 1],
+				full: false,
+			},
+		]);
+		expect(source.history.length).toBe(3);
+		expect(text(source.history.line(0)).trimEnd()).toBe("2");
+	});
+
 	it("lists only the screen rows that changed", () => {
 		const term = createTerminal({ cols: 10, rows: 4 });
 		term.write("a\r\nb\r\nc");
@@ -109,6 +126,31 @@ describe("screenLineFromCells", () => {
 			fg: 1,
 			bold: true,
 		});
+	});
+
+	it("keeps hidden, struck and blinking text apart on an xterm line", async () => {
+		const xterm = new xtermHeadless.Terminal({
+			cols: 4,
+			rows: 1,
+			allowProposedApi: true,
+		});
+		await new Promise<void>((resolve) =>
+			xterm.write("\x1b[8mC\x1b[28;9mD\x1b[0;5mE", resolve),
+		);
+		const xtermLine = xterm.buffer.active.getLine(0);
+		if (!xtermLine) throw new Error("no line");
+		const { runs } = screenLineFromCells(xtermLine, 4);
+		expect(runs.map((run) => run.text)).toEqual(["C", "D", "E", " "]);
+		expect(runs[0]?.attrs).toMatchObject({
+			invisible: true,
+			strikethrough: false,
+		});
+		expect(runs[1]?.attrs).toMatchObject({
+			invisible: false,
+			strikethrough: true,
+		});
+		expect(runs[2]?.attrs).toMatchObject({ blink: true, strikethrough: false });
+		xterm.dispose();
 	});
 
 	it("reads an @xterm/headless line the same way", async () => {

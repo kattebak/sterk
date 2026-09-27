@@ -169,6 +169,26 @@ describe("createBufferView", () => {
 		expect(tokens(v, 1)).toEqual(["sterk-fg-1.sterk-bold"]);
 	});
 
+	it("draws hidden, struck and blinking runs with their own classes", async () => {
+		const source = new FakeSource(1);
+		const v = mount(source);
+		source.screenLines[0] = {
+			runs: [
+				line("C", { invisible: true }).runs[0],
+				line("D", { strikethrough: true }).runs[0],
+				line("E", { blink: true }).runs[0],
+			].filter((run) => run !== undefined),
+			wrapped: false,
+		};
+		source.emit({ screenRows: [0] });
+		await v.refresh();
+		expect(tokens(v, 0)).toEqual([
+			"sterk-invisible",
+			"sterk-strikethrough",
+			"sterk-blink",
+		]);
+	});
+
 	it("repaints from scratch on a full change", async () => {
 		const source = new FakeSource(3);
 		source.historyLines = numbered("row", 5).map((t) => line(t));
