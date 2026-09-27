@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Sterk Buffer View Harness</title>
+		<style>
+			* {
+				box-sizing: border-box;
+			}
+
+			html,
+			body {
+				margin: 0;
+				padding: 0;
+				background: #1e1e1e;
+				color: #d4d4d4;
+				font-family: monospace;
+			}
+
+			/*
+			 * Disable all animations so visual baselines are deterministic.
+			 * Cursor blink / transitions in Ace + sterk would otherwise
+			 * produce per-run pixel diffs.
+			 */
+			*,
+			*::before,
+			*::after {
+				animation-duration: 0s !important;
+				animation-delay: 0s !important;
+				transition-duration: 0s !important;
+				transition-delay: 0s !important;
+				caret-color: transparent !important;
+			}
+
+			#view {
+				width: 100vw;
+				height: 100vh;
+				overflow: hidden;
+			}
+
+			#view .sterk,
+			#view .sterk-viewport {
+				width: 100%;
+				height: 100%;
+				overflow: hidden;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="view" data-testid="view"></div>
+		<script type="module" src="./buffer-view.js"></script>
+	</body>
+</html>

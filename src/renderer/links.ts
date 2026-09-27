@@ -7,7 +7,7 @@
  * - File paths (absolute)
  */
 
-import type { Buffer, ILinkProvider, IProvidedLink } from "../types.js";
+import type { ILinkProvider, IProvidedLink } from "../types.js";
 
 /**
  * URL pattern (simplified - matches http:// and https://)
@@ -39,6 +39,15 @@ export interface Link {
 	 * generic click event), passing the originating mouse event.
 	 */
 	activate?: (event: MouseEvent | undefined, text: string) => void;
+}
+
+/**
+ * The buffer surface link detection reads: sterk's `Buffer` satisfies it,
+ * and so does the buffer view's row model.
+ */
+export interface LinkBuffer {
+	readonly viewportY: number;
+	getLine(y: number): { translateToString(trimRight?: boolean): string } | null;
 }
 
 /** A provider-supplied link source. */
@@ -104,7 +113,7 @@ export function scanLineForLinks(text: string, row: number): Link[] {
  * @returns Array of detected links
  */
 export function scanBufferForLinks(
-	buffer: Buffer,
+	buffer: LinkBuffer,
 	startRow: number,
 	endRow: number,
 ): Link[] {
@@ -136,7 +145,7 @@ export class LinkDetector {
 
 	constructor(
 		private element: HTMLElement,
-		private buffer: () => Buffer,
+		private buffer: () => LinkBuffer,
 		private getCellMetrics: () => { width: number; height: number } | null,
 	) {
 		element.addEventListener("mousemove", this.handleMouseMove);

@@ -77,6 +77,26 @@ export {
 	rgbToPalette,
 } from "./util/colors.js";
 
+// ── Buffer view: draw a buffer sterk does not own ───────────────────
+
+export {
+	type BufferView,
+	type BufferViewOptions,
+	createBufferView,
+} from "./view/buffer_view.js";
+export {
+	type CellLike,
+	type LineLike,
+	type ScreenAttrs,
+	type ScreenChange,
+	type ScreenColorMode,
+	type ScreenLine,
+	type ScreenRun,
+	type ScreenSource,
+	screenLineFromCells,
+} from "./view/screen_source.js";
+export { createTerminalScreenSource } from "./view/terminal_source.js";
+
 // ── M1: EventEmitter Shim ───────────────────────────────────────────
 
 export { EventEmitter } from "./util/event_emitter.js";
@@ -89,8 +109,15 @@ export { EventEmitter } from "./util/event_emitter.js";
 
 // ── Constructor Stub ─────────────────────────────────────────────────
 
+import { ACE_RENDERING } from "./rendering.js";
 import { TerminalImpl } from "./terminal.js";
 import type { Terminal as TerminalInstance, TerminalOptions } from "./types.js";
+
+class RenderedTerminal extends TerminalImpl {
+	constructor(options?: TerminalOptions) {
+		super(options, ACE_RENDERING);
+	}
+}
 
 /**
  * `Terminal` constructor — xterm.js-compatible entry point.
@@ -112,7 +139,7 @@ import type { Terminal as TerminalInstance, TerminalOptions } from "./types.js";
  * term.writeln('Hello, world!');
  * ```
  */
-export const Terminal = TerminalImpl as unknown as {
+export const Terminal = RenderedTerminal as unknown as {
 	new (options?: TerminalOptions): TerminalInstance;
 };
 

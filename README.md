@@ -76,6 +76,46 @@ console.log(line?.translateToString());
 
 A bare line feed (`\n`) moves down one row and keeps the column, as in xterm; pass `convertEol: true` to have it return to column 0 as well.
 
+### Headless entry (no Ace)
+
+`@kattebak/sterk/headless` exports the same `Terminal` and `createTerminal`
+without the renderer, so Ace stays out of the bundle. The parser, buffer,
+`onReply` and markers work as above; `open()` and `setFont()` throw.
+
+```typescript
+import { createTerminal } from '@kattebak/sterk/headless';
+
+const term = createTerminal({ cols: 80, rows: 24 });
+term.onReply((reply) => pty.write(reply));
+```
+
+### Drawing a buffer sterk does not own
+
+`createBufferView(container, source, options?)` draws any `ScreenSource`: an
+object with `rows`, `cols`, `history.length`/`history.line(i)`,
+`screen.line(row)`, `cursor` and `subscribe(listener)`. The listener gets
+`{ history: { removedTop, appended }, screenRows, full }`, and the view
+redraws only those rows. It follows the bottom, holds its rows in place when
+scrolled up (also across top trims), and has the terminal's scroll,
+selection, theme, font and link-provider API.
+
+`screenLineFromCells(line, cols)` turns a sterk `BufferLine` or an
+`@xterm/headless` `IBufferLine` into a `ScreenLine`.
+`createTerminalScreenSource(term)` is the reference source over a sterk
+terminal:
+
+```typescript
+import { createBufferView, createTerminalScreenSource } from '@kattebak/sterk';
+import { createTerminal } from '@kattebak/sterk/headless';
+
+const term = createTerminal({ cols: 80, rows: 24 });
+const view = createBufferView(
+  document.getElementById('terminal'),
+  createTerminalScreenSource(term),
+);
+view.onData((data) => pty.write(data));
+```
+
 ### DOM mode (with Ace renderer)
 
 ```typescript
