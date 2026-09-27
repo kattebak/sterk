@@ -133,7 +133,8 @@ function sameAttrs(a: ScreenAttrs, b: ScreenAttrs): boolean {
 /**
  * Convert a buffer line of `cols` cells into runs. Works on a sterk
  * `BufferLine` and on an `@xterm/headless` `IBufferLine` alike, so an
- * adapter over either is a few lines of glue.
+ * adapter over either is a few lines of glue. Reading an xterm buffer needs
+ * the terminal built with `allowProposedApi: true`.
  */
 export function screenLineFromCells(line: LineLike, cols: number): ScreenLine {
 	const runs: { text: string; attrs: ScreenAttrs }[] = [];

@@ -112,7 +112,11 @@ describe("screenLineFromCells", () => {
 	});
 
 	it("reads an @xterm/headless line the same way", async () => {
-		const xterm = new xtermHeadless.Terminal({ cols: 8, rows: 2 });
+		const xterm = new xtermHeadless.Terminal({
+			cols: 8,
+			rows: 2,
+			allowProposedApi: true,
+		});
 		await new Promise<void>((resolve) =>
 			xterm.write("ab\x1b[1;31mcd\x1b[0m\x1b[38;2;1;2;3m中\x1b[0m", resolve),
 		);
