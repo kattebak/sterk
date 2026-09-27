@@ -74,6 +74,8 @@ const line = term.buffer.active.getLine(0);
 console.log(line?.translateToString());
 ```
 
+A bare line feed (`\n`) moves down one row and keeps the column, as in xterm; pass `convertEol: true` to have it return to column 0 as well.
+
 ### DOM mode (with Ace renderer)
 
 ```typescript
