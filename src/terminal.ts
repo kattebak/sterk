@@ -146,9 +146,9 @@ export interface TerminalRendering {
 	): LinkDetector;
 }
 
-function headlessOnly(method: string): Error {
+function headlessOnly(what: string): Error {
 	return new Error(
-		`${method}() needs a renderer: import Terminal from "@kattebak/sterk" instead of "@kattebak/sterk/headless"`,
+		`${what} needs a renderer: import Terminal from "@kattebak/sterk" instead of "@kattebak/sterk/headless"`,
 	);
 }
 
@@ -225,7 +225,7 @@ export class TerminalImpl implements Terminal {
 		const fontId = requestedFont === "" ? undefined : requestedFont;
 		let resolvedFontFamily = options?.fontFamily ?? "monospace";
 		if (fontId !== undefined) {
-			if (!rendering) throw headlessOnly("font");
+			if (!rendering) throw headlessOnly("The font option");
 			// Built-in font takes precedence over any consumer-supplied
 			// `fontFamily` (the explicit-opt-out path above sets fontId to
 			// undefined, so this only fires when the consumer asked for a
@@ -722,7 +722,7 @@ export class TerminalImpl implements Terminal {
 			throw new Error("Terminal is already opened");
 		}
 		const rendering = this.rendering;
-		if (!rendering) throw headlessOnly("open");
+		if (!rendering) throw headlessOnly("open()");
 
 		// Create renderer
 		this.aceRenderer = rendering.createRenderer(
@@ -897,7 +897,7 @@ export class TerminalImpl implements Terminal {
 	 * `forceRepaint()` would expose.
 	 */
 	setFont(fontId: string): void {
-		if (!this.rendering) throw headlessOnly("setFont");
+		if (!this.rendering) throw headlessOnly("setFont()");
 		const font = this.rendering.loadFont(fontId);
 		const family = font.family;
 		this._options.font = font.id;

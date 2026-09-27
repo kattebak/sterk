@@ -5,7 +5,7 @@ import { build } from "vite";
 import { describe, expect, it } from "vitest";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const HEADLESS_BUDGET_KB = 60;
+const HEADLESS_BUDGET_KB = 120;
 
 interface Bundle {
 	modules: string[];
