@@ -67,11 +67,16 @@ describe("ScrollBuffer", () => {
 			expect(buffer.cursorY).toBe(0);
 		});
 
-		it("wraps to next line at right margin", () => {
+		it("wraps to next line at right margin on the next character", () => {
 			buffer.setCursor(79, 0);
 			buffer.writeCell("A", 65, DEFAULT_CELL_ATTRIBUTES);
-			expect(buffer.cursorX).toBe(0);
+			expect(buffer.cursorX).toBe(79);
+			expect(buffer.cursorY).toBe(0);
+			buffer.writeCell("B", 66, DEFAULT_CELL_ATTRIBUTES);
+			expect(buffer.cursorX).toBe(1);
 			expect(buffer.cursorY).toBe(1);
+			expect(buffer.getLine(1)?.getCell(0).getChars()).toBe("B");
+			expect(buffer.getLine(1)?.isWrapped).toBe(true);
 		});
 
 		it("stores cell attributes correctly", () => {
@@ -290,7 +295,7 @@ describe("ScrollBuffer", () => {
 			buffer.setCursor(70, 20);
 			buffer.resize(40, 15);
 			expect(buffer.cursorX).toBeLessThan(40);
-			expect(buffer.cursorY).toBeLessThan(15);
+			expect(buffer.cursorY - (buffer.length - 15)).toBeLessThan(15);
 		});
 
 		it("preserves existing content when growing", () => {

@@ -255,6 +255,18 @@ export interface Terminal {
 	onBell(callback: () => void): Disposable;
 
 	/**
+	 * Register a callback invoked with each reply the terminal sends back to
+	 * the host: device attributes (DA), status and cursor-position reports
+	 * (DSR/CPR), and colour queries (OSC 4, 10, 11, 12). Forward the data to
+	 * the program's input (the pty) so programs that probe the terminal get
+	 * their answer. Replies are not emitted on `onData`.
+	 *
+	 * @param callback - Function receiving the reply bytes
+	 * @returns Disposable handle to unregister the callback
+	 */
+	onReply(callback: (data: string) => void): Disposable;
+
+	/**
 	 * Register a callback invoked when the viewport scroll position changes.
 	 * The callback receives the new top line (absolute row index of the
 	 * topmost visible row, i.e. `viewportY`). Mirrors xterm.js
@@ -813,28 +825,31 @@ export interface Buffer {
 	readonly length: number;
 
 	/**
-	 * Cursor X position (column) within the active row.
-	 * 0-indexed.
+	 * Cursor X position (column), 0-indexed, always `0..cols-1`. After a
+	 * character is printed in the last column the cursor stays on that
+	 * column with a wrap pending (xterm.js reports `cols` instead).
 	 */
 	readonly cursorX: number;
 
 	/**
-	 * Cursor Y position (row) relative to the viewport top.
-	 * 0-indexed. Does NOT include scrollback offset — use baseY for that.
+	 * Index of the cursor's line in the buffer, in the same coordinates as
+	 * `getLine(y)`, so it includes scrollback. The cursor's row on the live
+	 * screen is `cursorY - (length - rows)` (xterm.js reports the live-screen
+	 * row here instead).
 	 */
 	readonly cursorY: number;
 
 	/**
-	 * Absolute row index of the first row in the scrollback buffer.
-	 * When scrollback is empty, baseY === 0.
-	 * When scrollback has N lines, baseY === N.
+	 * Number of lines dropped from the start of the buffer once it reached
+	 * `rows + scrollback` lines; 0 until then. Markers report
+	 * `baseY + getLine index`. This is not xterm.js's `baseY`: the first
+	 * live-screen row is at `getLine(length - rows)`.
 	 */
 	readonly baseY: number;
 
 	/**
-	 * Absolute row index of the topmost visible row in the viewport.
-	 * Tracks the user's scroll position.
-	 * When pinned to the bottom, viewportY === baseY.
+	 * `getLine` index of the topmost visible row, tracking the user's scroll
+	 * position. When pinned to the bottom, `viewportY === length - rows`.
 	 */
 	readonly viewportY: number;
 

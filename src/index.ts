@@ -145,7 +145,7 @@ export type Terminal = TerminalInstance;
  * });
  *
  * term.write('Hello, world!');
- * term.write('\x1b[1;31mBold red text\x1b[0m\n');
+ * term.write('\x1b[1;31mBold red text\x1b[0m\r\n');
  * ```
  */
 export function createTerminal(options?: TerminalOptions): TerminalInstance {

@@ -126,7 +126,7 @@ interface ParserActions {
 	/** Dispatch a CSI sequence */
 	csiDispatch(params: number[][], intermediates: number[], final: number): void;
 	/** Dispatch an OSC sequence */
-	oscDispatch(id: number, data: string): void;
+	oscDispatch(id: number, data: string, terminator: string): void;
 	/** Put a character into the current param/intermediate buffer */
 	put(code: number): void;
 	/** Collect an intermediate character */
@@ -787,7 +787,7 @@ export class VtParser {
 
 		// BEL (07) terminates OSC
 		if (byte === 0x07) {
-			this.dispatchOsc();
+			this.dispatchOsc("\x07");
 			this.transitionTo(ParserState.GROUND);
 			return;
 		}
@@ -817,14 +817,14 @@ export class VtParser {
 	/**
 	 * Dispatch accumulated OSC string
 	 */
-	private dispatchOsc(): void {
+	private dispatchOsc(terminator = "\x1b\\"): void {
 		// Parse OSC id and data
 		const semicolonIndex = this.oscData.indexOf(";");
 		if (semicolonIndex === -1) {
 			// No semicolon - just OSC id with no data
 			const id = Number.parseInt(this.oscData, 10);
 			if (!Number.isNaN(id)) {
-				this.callOscHandlers(id, "");
+				this.callOscHandlers(id, "", terminator);
 			}
 			return;
 		}
@@ -834,14 +834,14 @@ export class VtParser {
 		const id = Number.parseInt(idStr, 10);
 
 		if (!Number.isNaN(id)) {
-			this.callOscHandlers(id, data);
+			this.callOscHandlers(id, data, terminator);
 		}
 	}
 
 	/**
 	 * Call registered OSC handlers
 	 */
-	private callOscHandlers(id: number, data: string): void {
+	private callOscHandlers(id: number, data: string, terminator: string): void {
 		const handlers = this.oscHandlers.get(id);
 		if (handlers) {
 			for (const handler of handlers) {
@@ -853,7 +853,7 @@ export class VtParser {
 		}
 
 		// Always call the actions.oscDispatch for internal handling
-		this.actions.oscDispatch(id, data);
+		this.actions.oscDispatch(id, data, terminator);
 	}
 
 	/**

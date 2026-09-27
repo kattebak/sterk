@@ -112,10 +112,10 @@ describe("Terminal.refresh()", () => {
 		// flush, snapshot. This is the canonical post-burst document.
 		const reference = createTerminal({ cols: 40, rows: 10 });
 		reference.open?.(container);
-		reference.write("alpha\n");
-		reference.write("beta\n");
-		reference.write("gamma\n");
-		reference.write("delta\n");
+		reference.write("alpha\r\n");
+		reference.write("beta\r\n");
+		reference.write("gamma\r\n");
+		reference.write("delta\r\n");
 		await new Promise<void>((resolve) =>
 			requestAnimationFrame(() => resolve()),
 		);
@@ -133,13 +133,13 @@ describe("Terminal.refresh()", () => {
 		term.open?.(container);
 
 		const refreshes: Promise<void>[] = [];
-		term.write("alpha\n");
+		term.write("alpha\r\n");
 		refreshes.push(term.refresh?.() ?? Promise.resolve());
-		term.write("beta\n");
+		term.write("beta\r\n");
 		refreshes.push(term.refresh?.() ?? Promise.resolve());
-		term.write("gamma\n");
+		term.write("gamma\r\n");
 		refreshes.push(term.refresh?.() ?? Promise.resolve());
-		term.write("delta\n");
+		term.write("delta\r\n");
 		refreshes.push(term.refresh?.() ?? Promise.resolve());
 
 		await Promise.all(refreshes);

@@ -7,7 +7,6 @@
 
 import {
 	BufferNamespaceImpl,
-	type CellAttributes,
 	DEFAULT_CELL_ATTRIBUTES,
 	type ScrollBuffer,
 } from "./buffer/scroll_buffer.js";
@@ -32,7 +31,12 @@ import {
 	MouseHandler,
 	MouseTrackingMode,
 } from "./renderer/mouse.js";
-import { applyTheme, clearTruecolorCache } from "./renderer/theme.js";
+import {
+	applyTheme,
+	clearTruecolorCache,
+	DEFAULT_THEME,
+	resolveThemePalette,
+} from "./renderer/theme.js";
 import { builtinThemeToTheme, getBuiltinTheme } from "./themes/index.js";
 import type {
 	BufferNamespace,
@@ -50,6 +54,7 @@ import type {
 	ParserHandlerIdentifier,
 	Terminal,
 	TerminalOptions,
+	Theme,
 } from "./types.js";
 import { EventEmitter } from "./util/event_emitter.js";
 
@@ -83,6 +88,45 @@ class ParserImpl implements Parser {
 	): Disposable {
 		return this.vtParser.registerDcsHandler(id, handler);
 	}
+}
+
+function paletteColor(theme: Theme, index: number): string | undefined {
+	return resolveThemePalette(theme)[index];
+}
+
+function parseColor(color: string): [number, number, number] | null {
+	const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(color);
+	if (short) {
+		return [short[1], short[2], short[3]].map((c) =>
+			Number.parseInt(`${c}${c}`, 16),
+		) as [number, number, number];
+	}
+	const long = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+	if (long) {
+		return [long[1], long[2], long[3]].map((c) =>
+			Number.parseInt(c ?? "0", 16),
+		) as [number, number, number];
+	}
+	const fn = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(color);
+	if (fn) {
+		return [fn[1], fn[2], fn[3]].map((c) => Math.min(255, Number(c))) as [
+			number,
+			number,
+			number,
+		];
+	}
+	return null;
+}
+
+/**
+ * Format a CSS colour as the X11 `rgb:rrrr/gggg/bbbb` spec xterm uses in
+ * colour-query replies, or `null` for a colour sterk cannot parse (named
+ * colours, alpha forms, `transparent`) so no wrong colour is reported.
+ */
+function xtermColorSpec(color: string | undefined): string | null {
+	const rgb = color === undefined ? null : parseColor(color);
+	if (!rgb) return null;
+	return `rgb:${rgb.map((c) => (c * 257).toString(16).padStart(4, "0")).join("/")}`;
 }
 
 /**
@@ -203,8 +247,8 @@ export class TerminalImpl implements Terminal {
 				intermediates: number[],
 				final: number,
 			) => this.handleCsiDispatch(params, intermediates, final),
-			oscDispatch: (id: number, data: string) =>
-				this.handleOscDispatch(id, data),
+			oscDispatch: (id: number, data: string, terminator: string) =>
+				this.handleOscDispatch(id, data, terminator),
 			put: (_code: number) => {
 				/* Not used in basic implementation */
 			},
@@ -260,19 +304,7 @@ export class TerminalImpl implements Terminal {
 		const beforeCursorY = this.scrollBuffer.cursorY;
 		const beforeViewportY = this.scrollBuffer.viewportY;
 
-		// convertEol: treat a bare `\n` (LF) as `\r\n` (CRLF) so Unix-style
-		// line endings land at the start of the next row instead of stair-
-		// stepping. We only rewrite LFs that aren't already preceded by a CR,
-		// so existing CRLFs are untouched. Decode bytes to a string first so
-		// the rewrite is uniform across both input shapes.
-		let payload: string | Uint8Array = data;
-		if (this._options.convertEol) {
-			const str =
-				typeof data === "string" ? data : new TextDecoder().decode(data);
-			payload = str.replace(/(?<!\r)\n/g, "\r\n");
-		}
-
-		this.vtParser.write(payload);
+		this.vtParser.write(data);
 		if (this.aceRenderer) {
 			this.aceRenderer.scheduleUpdate();
 		}
@@ -387,7 +419,7 @@ export class TerminalImpl implements Terminal {
 		}
 		this._options.cols = cols;
 		this._options.rows = rows;
-		this.scrollBuffer.resize(cols, rows);
+		this.bufferNamespace.resize(cols, rows);
 		if (this.aceRenderer) {
 			this.aceRenderer.resize(cols, rows);
 		}
@@ -531,6 +563,20 @@ export class TerminalImpl implements Terminal {
 		return {
 			dispose: () => {
 				this.emitter.off("line-feed", callback);
+			},
+		};
+	}
+
+	onReply(callback: (data: string) => void): Disposable {
+		const wrapper = (data: unknown) => {
+			if (typeof data === "string") {
+				callback(data);
+			}
+		};
+		this.emitter.on("reply", wrapper);
+		return {
+			dispose: () => {
+				this.emitter.off("reply", wrapper);
 			},
 		};
 	}
@@ -1108,63 +1154,47 @@ export class TerminalImpl implements Terminal {
 	 * Execute a C0 or C1 control code
 	 */
 	private handleExecute(code: number): void {
+		const buf = this.scrollBuffer;
 		switch (code) {
 			case 0x07: // BEL
-				// Bell - emit event but don't make noise in M2
 				this.emitter.emit("bell");
 				break;
 
 			case 0x08: // BS (backspace)
-				{
-					const x = this.scrollBuffer.cursorX;
-					if (x > 0) {
-						this.scrollBuffer.setCursor(x - 1, this.scrollBuffer.cursorY);
-					}
+				if (buf.cursorX > 0) {
+					buf.setCursor(buf.cursorX - 1, buf.cursorY);
 				}
 				break;
 
 			case 0x09: // HT (horizontal tab)
+				if (buf.isWrapPending) break;
 				{
-					// Tab to next 8-column boundary
-					const x = this.scrollBuffer.cursorX;
-					const nextTab = Math.floor((x + 8) / 8) * 8;
-					this.scrollBuffer.setCursor(
-						Math.min(nextTab, this.cols - 1),
-						this.scrollBuffer.cursorY,
-					);
+					const nextTab = Math.floor((buf.cursorX + 8) / 8) * 8;
+					buf.setCursor(Math.min(nextTab, this.cols - 1), buf.cursorY);
 				}
 				break;
 
 			case 0x0a: // LF (line feed)
 			case 0x0b: // VT (vertical tab, treat as LF)
 			case 0x0c: // FF (form feed, treat as LF)
-				{
-					// onLineFeed fires for an actual line feed (LF, 0x0a),
-					// matching xterm.js (VT/FF are treated as LF for cursor
-					// movement but are not "line feed" events).
-					if (code === 0x0a) {
-						this.emitter.emit("line-feed");
-					}
-					// Modern terminals treat LF as newline (LF+CR) by default
-					const y = this.scrollBuffer.cursorY;
-					if (y >= this.rows - 1) {
-						// At bottom row - insert new line and move cursor to it
-						this.scrollBuffer.insertLine();
-						// Move cursor to the newly inserted line (at the end of buffer)
-						const newLineIndex = this.scrollBuffer.length - 1;
-						this.scrollBuffer.setCursor(0, newLineIndex);
-					} else {
-						// Move cursor to start of next line
-						this.scrollBuffer.setCursor(0, y + 1);
-					}
+				// onLineFeed fires for an actual line feed (LF, 0x0a),
+				// matching xterm.js (VT/FF are treated as LF for cursor
+				// movement but are not "line feed" events).
+				if (code === 0x0a) {
+					this.emitter.emit("line-feed");
+				}
+				// LF moves down in the same column; `convertEol` makes it
+				// return the carriage as well.
+				buf.index();
+				if (this._options.convertEol) {
+					buf.setScreenCursor(0, buf.screenCursorY);
 				}
 				break;
 
 			case 0x0d: // CR (carriage return)
-				this.scrollBuffer.setCursor(0, this.scrollBuffer.cursorY);
+				buf.setCursor(0, buf.cursorY);
 				break;
 
-			// Other C0 controls - ignore for now
 			default:
 				break;
 		}
@@ -1174,19 +1204,27 @@ export class TerminalImpl implements Terminal {
 	 * Handle ESC sequences
 	 */
 	private handleEscDispatch(intermediates: number[], final: number): void {
-		// Handle cursor save/restore (DECSC/DECRC)
-		if (intermediates.length === 0) {
-			switch (final) {
-				case 0x37: // ESC 7 - DECSC (save cursor)
-					this.bufferNamespace.saveCursor(this.vtParser.currentAttrs);
-					break;
-				case 0x38: // ESC 8 - DECRC (restore cursor)
-					this.bufferNamespace.restoreCursor(this.vtParser.currentAttrs);
-					break;
-				default:
-					// Unknown ESC sequence - ignore
-					break;
-			}
+		if (intermediates.length !== 0) return;
+		const buf = this.scrollBuffer;
+		switch (final) {
+			case 0x37: // ESC 7 - DECSC (save cursor)
+				this.bufferNamespace.saveCursor(this.vtParser.currentAttrs);
+				break;
+			case 0x38: // ESC 8 - DECRC (restore cursor)
+				this.bufferNamespace.restoreCursor(this.vtParser.currentAttrs);
+				break;
+			case 0x44: // ESC D - IND (index)
+				buf.index();
+				break;
+			case 0x45: // ESC E - NEL (next line)
+				buf.index();
+				buf.setScreenCursor(0, buf.screenCursorY);
+				break;
+			case 0x4d: // ESC M - RI (reverse index)
+				buf.reverseIndex();
+				break;
+			default:
+				break;
 		}
 	}
 
@@ -1195,115 +1233,98 @@ export class TerminalImpl implements Terminal {
 	 */
 	private handleCsiDispatch(
 		params: number[][],
-		_intermediates: number[],
+		intermediates: number[],
 		final: number,
 	): void {
 		const p1 = params[0]?.[0] ?? 1; // Most commands default to 1
 		const p2 = params[1]?.[0] ?? 1;
+		const n = Math.max(1, p1);
+		const buf = this.scrollBuffer;
+		const plain = intermediates.length === 0;
+		const prefix = intermediates.length === 1 ? intermediates[0] : undefined;
 
 		switch (final) {
 			case 0x41: // CUU - Cursor Up
 				{
-					// Param 0 is treated as 1 for cursor movement
-					const n = Math.max(1, p1);
-					const y = this.scrollBuffer.cursorY;
-					this.scrollBuffer.setCursor(
-						this.scrollBuffer.cursorX,
-						Math.max(0, y - n),
-					);
+					const row = buf.screenCursorY;
+					const top = row >= buf.regionTop ? buf.regionTop : 0;
+					buf.setScreenCursor(buf.cursorX, Math.max(top, row - n));
 				}
 				break;
 
 			case 0x42: // CUD - Cursor Down
 				{
-					// Param 0 is treated as 1 for cursor movement
-					const n = Math.max(1, p1);
-					const y = this.scrollBuffer.cursorY;
-					this.scrollBuffer.setCursor(
-						this.scrollBuffer.cursorX,
-						Math.min(this.rows - 1, y + n),
-					);
+					const row = buf.screenCursorY;
+					const bottom =
+						row <= buf.regionBottom ? buf.regionBottom : this.rows - 1;
+					buf.setScreenCursor(buf.cursorX, Math.min(bottom, row + n));
 				}
 				break;
 
 			case 0x43: // CUF - Cursor Forward
-				{
-					// Param 0 is treated as 1 for cursor movement
-					const n = Math.max(1, p1);
-					const x = this.scrollBuffer.cursorX;
-					this.scrollBuffer.setCursor(
-						Math.min(this.cols - 1, x + n),
-						this.scrollBuffer.cursorY,
-					);
-				}
+				buf.setScreenCursor(buf.cursorX + n, buf.screenCursorY);
 				break;
 
 			case 0x44: // CUB - Cursor Back
-				{
-					// Param 0 is treated as 1 for cursor movement
-					const n = Math.max(1, p1);
-					const x = this.scrollBuffer.cursorX;
-					this.scrollBuffer.setCursor(
-						Math.max(0, x - n),
-						this.scrollBuffer.cursorY,
-					);
-				}
+				buf.setScreenCursor(buf.cursorX - n, buf.screenCursorY);
 				break;
 
 			case 0x48: // CUP - Cursor Position
 			case 0x66: // HVP - Horizontal and Vertical Position
-				{
-					// VT100 CUP / HVP coordinates are 1-based and **relative to
-					// the visible screen** — NOT to the buffer's absolute line
-					// index. The scrollback ring keeps the live screen at the
-					// bottom `rows` lines (offset = `liveTop`); we must add
-					// that offset, otherwise `\x1b[<rows>;1H` from a status-
-					// bar redraw lands on a scrollback line and the previous
-					// status freezes on-screen. Each refresh appends another
-					// stale bar — which is what produced the "magenta status
-					// bar duplicates 3×" the user reported in mobux.
-					const row = p1 - 1; // 1-based to 0-based, viewport-relative
-					const col = p2 - 1;
-					const absRow = this.scrollBuffer.liveTop + row;
-					this.scrollBuffer.setCursor(
-						Math.max(0, Math.min(col, this.cols - 1)),
-						Math.max(
-							this.scrollBuffer.liveTop,
-							Math.min(absRow, this.scrollBuffer.liveTop + this.rows - 1),
-						),
-					);
-				}
+				// CUP / HVP coordinates are 1-based and relative to the live
+				// screen, never to the buffer's absolute line index.
+				buf.setScreenCursor(p2 - 1, p1 - 1);
 				break;
 
 			case 0x4a: // ED - Erase in Display
-				// Per ECMA-48 §8.3.39, missing parameter defaults to **0**
-				// (erase from cursor to end of display). The outer `p1` falls
-				// back to 1, which is the right default for cursor-movement
-				// commands (CUU/CUD/CUP/...) but the WRONG default for ED.
-				// Routing `\x1b[J` as ED-mode-1 (erase above cursor) instead
-				// of ED-mode-0 (erase below) corrupts the screen during any
-				// `clear()`-style sequence sent without an explicit parameter.
+				// Per ECMA-48 §8.3.39, a missing parameter defaults to 0.
 				this.eraseInDisplay(params[0]?.[0] ?? 0);
 				break;
 
 			case 0x4b: // EL - Erase in Line
-				// Per ECMA-48 §8.3.41, missing parameter defaults to **0**
-				// (erase from cursor to end of line). Pre-fix, `\x1b[K`
-				// (the textbook "erase to end of line" tmux/zsh status
-				// redraws emit) was routed as EL-mode-1 (erase to LEFT of
-				// cursor) because `p1` falls back to 1. That blanked the
-				// stale prompt prefix instead of the tail, leaving stale
-				// chars on the right end of the row — one of the two bugs
-				// that produced the mobux "magenta status bar duplicates"
-				// regression (the other being CUP-as-absolute, fixed
-				// above).
+				// Per ECMA-48 §8.3.41, a missing parameter defaults to 0.
 				this.eraseInLine(params[0]?.[0] ?? 0);
+				break;
+
+			case 0x4c: // IL - Insert Line
+				if (plain) buf.insertLines(n);
+				break;
+
+			case 0x4d: // DL - Delete Line
+				if (plain) buf.deleteLines(n);
+				break;
+
+			case 0x53: // SU - Scroll Up
+				if (plain) buf.scrollUp(n);
+				break;
+
+			case 0x54: // SD - Scroll Down
+				if (plain) buf.scrollDown(n);
+				break;
+
+			case 0x72: // DECSTBM - Set Top and Bottom Margins
+				if (plain) {
+					const top = params[0]?.[0] || 1;
+					const bottom = params[1]?.[0] || this.rows;
+					buf.setScrollRegion(top - 1, bottom - 1);
+				}
+				break;
+
+			case 0x63: // DA - Device Attributes
+				if (plain && !params[0]?.[0]) {
+					this.reply("\x1b[?1;2c");
+				} else if (prefix === 0x3e && !params[0]?.[0]) {
+					this.reply("\x1b[>0;276;0c");
+				}
+				break;
+
+			case 0x6e: // DSR - Device Status Report
+				this.deviceStatusReport(params[0]?.[0], plain, prefix === 0x3f);
 				break;
 
 			case 0x68: // SM - Set Mode (CSI ? ... h)
 			case 0x6c: // RM - Reset Mode (CSI ? ... l)
-				// Check for DEC private modes (indicated by '?' intermediate)
-				if (_intermediates.length === 1 && _intermediates[0] === 0x3f) {
+				if (prefix === 0x3f) {
 					this.handleDecPrivateMode(params, final === 0x68);
 				}
 				break;
@@ -1320,80 +1341,120 @@ export class TerminalImpl implements Terminal {
 				applySgr(params, this.vtParser.currentAttrs);
 				break;
 
-			// Unknown CSI sequences - ignore
 			default:
 				break;
 		}
 	}
 
 	/**
+	 * Answer DSR 5 (status) and DSR 6 (cursor position, also the DEC `?6`
+	 * form). The reported row is relative to the live screen.
+	 */
+	private deviceStatusReport(
+		kind: number | undefined,
+		plain: boolean,
+		dec: boolean,
+	): void {
+		if (!plain && !dec) return;
+		const buf = this.scrollBuffer;
+		const row = buf.screenCursorY + 1;
+		const col = buf.cursorX + (buf.isWrapPending ? 2 : 1);
+		if (kind === 5 && plain) {
+			this.reply("\x1b[0n");
+			return;
+		}
+		if (kind === 6) {
+			this.reply(dec ? `\x1b[?${row};${col}R` : `\x1b[${row};${col}R`);
+		}
+	}
+
+	private reply(data: string): void {
+		this.emitter.emit("reply", data);
+	}
+
+	/**
 	 * Handle OSC sequences
 	 */
-	private handleOscDispatch(id: number, data: string): void {
+	private handleOscDispatch(
+		id: number,
+		data: string,
+		terminator: string,
+	): void {
 		// OSC 0 (icon name + window title) and OSC 2 (window title) carry the
 		// terminal title string. Emit onTitleChange for both, matching
 		// xterm.js. Consumer-registered OSC handlers (including OSC 133) are
 		// invoked independently by the parser and are not disturbed here.
 		if (id === 0 || id === 2) {
 			this.emitter.emit("title-change", data);
+			return;
+		}
+		if (id === 4) {
+			this.answerPaletteQuery(data, terminator);
+			return;
+		}
+		if (id === 10 || id === 11 || id === 12) {
+			this.answerDynamicColorQuery(id, data, terminator);
+		}
+	}
+
+	/** OSC 10/11/12 `?`: report foreground, background or cursor colour. */
+	private answerDynamicColorQuery(
+		id: number,
+		data: string,
+		terminator: string,
+	): void {
+		const theme = this._options.theme;
+		const colors = [
+			theme.foreground ?? DEFAULT_THEME.foreground,
+			theme.background ?? DEFAULT_THEME.background,
+			theme.cursor ?? theme.foreground ?? DEFAULT_THEME.cursor,
+		];
+		const queries = data.split(";");
+		queries.forEach((query, i) => {
+			const color = colors[id - 10 + i];
+			if (query !== "?") return;
+			const spec = xtermColorSpec(color);
+			if (spec === null) return;
+			this.reply(`\x1b]${id + i};${spec}${terminator}`);
+		});
+	}
+
+	/** OSC 4 `index;?` pairs: report the palette entry for each index. */
+	private answerPaletteQuery(data: string, terminator: string): void {
+		const parts = data.split(";");
+		for (let i = 0; i + 1 < parts.length; i += 2) {
+			const index = Number(parts[i]);
+			if (parts[i + 1] !== "?" || !Number.isInteger(index)) continue;
+			if (index < 0 || index > 255) continue;
+			const spec = xtermColorSpec(paletteColor(this._options.theme, index));
+			if (spec === null) continue;
+			this.reply(`\x1b]4;${index};${spec}${terminator}`);
 		}
 	}
 
 	/**
 	 * Erase in Display (ED)
-	 * @param mode - 0: below cursor, 1: above cursor, 2: entire screen
+	 * @param mode - 0: below cursor, 1: above cursor, 2: entire screen,
+	 *   3: scrollback
 	 */
 	private eraseInDisplay(mode: number): void {
-		const blankAttrs: CellAttributes = { ...DEFAULT_CELL_ATTRIBUTES };
-
+		const buf = this.scrollBuffer;
+		const row = buf.screenCursorY;
 		switch (mode) {
-			case 0: // Erase below cursor (inclusive)
-				{
-					// Clear from cursor to end of current line
-					this.eraseInLine(0);
-
-					// Clear all lines below current
-					const startY = this.scrollBuffer.cursorY + 1;
-					for (let y = startY; y < this.rows; y++) {
-						for (let x = 0; x < this.cols; x++) {
-							const savedCursor = {
-								x: this.scrollBuffer.cursorX,
-								y: this.scrollBuffer.cursorY,
-							};
-							this.scrollBuffer.setCursor(x, y);
-							this.scrollBuffer.writeCell(" ", 32, blankAttrs);
-							this.scrollBuffer.setCursor(savedCursor.x, savedCursor.y);
-						}
-					}
-				}
+			case 0:
+				buf.eraseScreenRow(row, buf.eraseFromX);
+				for (let y = row + 1; y < this.rows; y++) buf.eraseScreenRow(y);
 				break;
-
-			case 1: // Erase above cursor (inclusive)
-				{
-					// Clear all lines above current
-					const endY = this.scrollBuffer.cursorY;
-					for (let y = 0; y < endY; y++) {
-						for (let x = 0; x < this.cols; x++) {
-							const savedCursor = {
-								x: this.scrollBuffer.cursorX,
-								y: this.scrollBuffer.cursorY,
-							};
-							this.scrollBuffer.setCursor(x, y);
-							this.scrollBuffer.writeCell(" ", 32, blankAttrs);
-							this.scrollBuffer.setCursor(savedCursor.x, savedCursor.y);
-						}
-					}
-
-					// Clear from start of current line to cursor
-					this.eraseInLine(1);
-				}
+			case 1:
+				for (let y = 0; y < row; y++) buf.eraseScreenRow(y);
+				buf.eraseScreenRow(row, 0, buf.cursorX);
 				break;
-
-			case 2: // Erase entire screen
-			case 3: // Erase entire screen + scrollback (treat as 2 for now)
-				this.clear();
+			case 2:
+				for (let y = 0; y < this.rows; y++) buf.eraseScreenRow(y);
 				break;
-
+			case 3:
+				buf.clearScrollback();
+				break;
 			default:
 				break;
 		}
@@ -1404,47 +1465,18 @@ export class TerminalImpl implements Terminal {
 	 * @param mode - 0: to right of cursor, 1: to left of cursor, 2: entire line
 	 */
 	private eraseInLine(mode: number): void {
-		const blankAttrs: CellAttributes = { ...DEFAULT_CELL_ATTRIBUTES };
-		const y = this.scrollBuffer.cursorY;
-		const cursorX = this.scrollBuffer.cursorX;
-
+		const buf = this.scrollBuffer;
+		const row = buf.screenCursorY;
 		switch (mode) {
-			case 0: // Erase to right of cursor (inclusive)
-				for (let x = cursorX; x < this.cols; x++) {
-					const savedCursor = {
-						x: this.scrollBuffer.cursorX,
-						y: this.scrollBuffer.cursorY,
-					};
-					this.scrollBuffer.setCursor(x, y);
-					this.scrollBuffer.writeCell(" ", 32, blankAttrs);
-					this.scrollBuffer.setCursor(savedCursor.x, savedCursor.y);
-				}
+			case 0:
+				buf.eraseScreenRow(row, buf.eraseFromX);
 				break;
-
-			case 1: // Erase to left of cursor (inclusive)
-				for (let x = 0; x <= cursorX; x++) {
-					const savedCursor = {
-						x: this.scrollBuffer.cursorX,
-						y: this.scrollBuffer.cursorY,
-					};
-					this.scrollBuffer.setCursor(x, y);
-					this.scrollBuffer.writeCell(" ", 32, blankAttrs);
-					this.scrollBuffer.setCursor(savedCursor.x, savedCursor.y);
-				}
+			case 1:
+				buf.eraseScreenRow(row, 0, buf.cursorX);
 				break;
-
-			case 2: // Erase entire line
-				for (let x = 0; x < this.cols; x++) {
-					const savedCursor = {
-						x: this.scrollBuffer.cursorX,
-						y: this.scrollBuffer.cursorY,
-					};
-					this.scrollBuffer.setCursor(x, y);
-					this.scrollBuffer.writeCell(" ", 32, blankAttrs);
-					this.scrollBuffer.setCursor(savedCursor.x, savedCursor.y);
-				}
+			case 2:
+				buf.eraseScreenRow(row);
 				break;
-
 			default:
 				break;
 		}
