@@ -11,26 +11,17 @@ import {
 	type ScrollBuffer,
 } from "./buffer/scroll_buffer.js";
 import {
-	DEFAULT_FONT_ID,
-	getBuiltinFont,
-	injectFontFace,
-} from "./fonts/index.js";
-import {
 	DecorationImpl,
 	type DecorationRenderContext,
 	MarkerImpl,
 } from "./marker.js";
 import { applySgr } from "./parser/sgr.js";
 import { VtParser } from "./parser/vt_parser.js";
-import { AceRenderer } from "./renderer/ace_renderer.js";
-import { InputHandler } from "./renderer/input.js";
-import type { Link } from "./renderer/links.js";
-import { LinkDetector } from "./renderer/links.js";
-import {
-	MouseEncoding,
-	MouseHandler,
-	MouseTrackingMode,
-} from "./renderer/mouse.js";
+import type { AceRenderer } from "./renderer/ace_renderer.js";
+import type { InputHandler } from "./renderer/input.js";
+import type { Link, LinkBuffer, LinkDetector } from "./renderer/links.js";
+import type { MouseHandler } from "./renderer/mouse.js";
+import { MouseEncoding, MouseTrackingMode } from "./renderer/mouse_modes.js";
 import {
 	applyTheme,
 	clearTruecolorCache,
@@ -130,6 +121,38 @@ function xtermColorSpec(color: string | undefined): string | null {
 }
 
 /**
+ * The DOM half of a terminal: fonts, the Ace renderer and the input, mouse
+ * and link handlers. The main entry supplies one; the headless entry does
+ * not, which keeps Ace out of its import graph.
+ */
+export interface TerminalRendering {
+	readonly defaultFont: string;
+	loadFont(fontId: string): { id: string; family: string };
+	createRenderer(
+		container: HTMLElement,
+		buffer: BufferNamespaceImpl,
+		fontSize: number,
+		fontFamily: string,
+	): AceRenderer;
+	createInputHandler(element: HTMLElement): InputHandler;
+	createMouseHandler(
+		element: HTMLElement,
+		getCellMetrics: () => { width: number; height: number } | null,
+	): MouseHandler;
+	createLinkDetector(
+		element: HTMLElement,
+		buffer: () => LinkBuffer,
+		getCellMetrics: () => { width: number; height: number } | null,
+	): LinkDetector;
+}
+
+function headlessOnly(method: string): Error {
+	return new Error(
+		`${method}() needs a renderer: import Terminal from "@kattebak/sterk" instead of "@kattebak/sterk/headless"`,
+	);
+}
+
+/**
  * Terminal implementation
  */
 export class TerminalImpl implements Terminal {
@@ -182,7 +205,10 @@ export class TerminalImpl implements Terminal {
 	// selection-subscription buffering pattern above.
 	private pendingLinkProviders: ILinkProvider[] = [];
 
-	constructor(options?: TerminalOptions) {
+	constructor(
+		options?: TerminalOptions,
+		private readonly rendering: TerminalRendering | null = null,
+	) {
 		// Resolve the font option. The contract: bare `createTerminal()` must
 		// render with a bundled font (JetBrains Mono) so consumers don't have
 		// to wire `@font-face` themselves. A consumer can opt OUT by passing
@@ -195,21 +221,16 @@ export class TerminalImpl implements Terminal {
 		// `fontFamily` passed explicitly without a `font` still wins — that
 		// is the escape hatch for consumers that want to manage their own
 		// font stack.
-		const fontId =
-			options?.font === undefined
-				? DEFAULT_FONT_ID
-				: options.font === ""
-					? undefined
-					: options.font;
+		const requestedFont = options?.font ?? rendering?.defaultFont ?? "";
+		const fontId = requestedFont === "" ? undefined : requestedFont;
 		let resolvedFontFamily = options?.fontFamily ?? "monospace";
 		if (fontId !== undefined) {
-			const font = getBuiltinFont(fontId);
-			injectFontFace(font);
+			if (!rendering) throw headlessOnly("font");
 			// Built-in font takes precedence over any consumer-supplied
 			// `fontFamily` (the explicit-opt-out path above sets fontId to
 			// undefined, so this only fires when the consumer asked for a
 			// bundled font).
-			resolvedFontFamily = `'${font.family}', monospace`;
+			resolvedFontFamily = rendering.loadFont(fontId).family;
 		}
 
 		// Default options
@@ -700,9 +721,11 @@ export class TerminalImpl implements Terminal {
 		if (this.aceRenderer) {
 			throw new Error("Terminal is already opened");
 		}
+		const rendering = this.rendering;
+		if (!rendering) throw headlessOnly("open");
 
 		// Create renderer
-		this.aceRenderer = new AceRenderer(
+		this.aceRenderer = rendering.createRenderer(
 			container,
 			this.bufferNamespace,
 			this._options.fontSize,
@@ -722,7 +745,7 @@ export class TerminalImpl implements Terminal {
 
 		// Create input handler
 		const editorElement = this.aceRenderer.getElement();
-		this.inputHandler = new InputHandler(editorElement);
+		this.inputHandler = rendering.createInputHandler(editorElement);
 		this.inputHandler.onData((data) => {
 			this.emitter.emit("data", data);
 		});
@@ -739,7 +762,7 @@ export class TerminalImpl implements Terminal {
 		}
 
 		// Create mouse handler
-		this.mouseHandler = new MouseHandler(editorElement, () =>
+		this.mouseHandler = rendering.createMouseHandler(editorElement, () =>
 			this.getCellMetrics(),
 		);
 		this.mouseHandler.onData((data) => {
@@ -767,7 +790,7 @@ export class TerminalImpl implements Terminal {
 		this.mouseHandler.setEncoding(this.pendingMouseEncoding);
 
 		// Create link detector
-		this.linkDetector = new LinkDetector(
+		this.linkDetector = rendering.createLinkDetector(
 			editorElement,
 			() => this.buffer.active,
 			() => this.getCellMetrics(),
@@ -796,7 +819,7 @@ export class TerminalImpl implements Terminal {
 		// Wire any selection-change subscriptions buffered before open().
 		for (const entry of this.selectionSubscriptions) {
 			if (!entry.unsubscribe) {
-				entry.unsubscribe = this.aceRenderer.onSelectionChange(entry.callback);
+				entry.unsubscribe = this.aceRenderer.listenSelection(entry.callback);
 			}
 		}
 
@@ -848,6 +871,7 @@ export class TerminalImpl implements Terminal {
 		const builtin = getBuiltinTheme(themeId);
 		const theme = builtinThemeToTheme(builtin);
 		this._options.theme = theme;
+		if (!this.rendering) return;
 		applyTheme(theme);
 		clearTruecolorCache();
 		if (this.aceRenderer) {
@@ -873,9 +897,9 @@ export class TerminalImpl implements Terminal {
 	 * `forceRepaint()` would expose.
 	 */
 	setFont(fontId: string): void {
-		const font = getBuiltinFont(fontId);
-		injectFontFace(font);
-		const family = `'${font.family}', monospace`;
+		if (!this.rendering) throw headlessOnly("setFont");
+		const font = this.rendering.loadFont(fontId);
+		const family = font.family;
 		this._options.font = font.id;
 		this._options.fontFamily = family;
 		if (this.aceRenderer) {
@@ -989,7 +1013,7 @@ export class TerminalImpl implements Terminal {
 		};
 		this.selectionSubscriptions.push(entry);
 		if (this.aceRenderer) {
-			entry.unsubscribe = this.aceRenderer.onSelectionChange(callback);
+			entry.unsubscribe = this.aceRenderer.listenSelection(callback);
 		}
 		return {
 			dispose: () => {

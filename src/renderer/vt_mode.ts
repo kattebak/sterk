@@ -31,11 +31,12 @@
 
 import type { Ace } from "ace-builds";
 import type { BufferNamespaceImpl } from "../buffer/scroll_buffer.js";
+import type { ScreenAttrs, ScreenColorMode } from "../view/screen_source.js";
 
 /**
  * Token representing a run of cells with identical attributes
  */
-interface VtToken {
+export interface VtToken {
 	type: string; // CSS class names (`.`-joined, see Ace wire-format note above)
 	value: string; // Text content
 }
@@ -51,91 +52,57 @@ export class VtMode {
 	 */
 	getMode(): Ace.SyntaxMode {
 		const bufferNamespace = this.bufferNamespace;
+		// We walk the **cell grid** (not the line-text character stream) so
+		// that wide-char placeholders contribute their empty `chars` and
+		// combining-mark anchors contribute their multi-codepoint `chars`
+		// ("é" = e + combining acute) in the right token. The line text Ace
+		// holds is exactly the concatenation of `cell.chars` for all cells,
+		// so joining `cell.chars` reproduces it byte-for-byte, with each char
+		// attributed to the cell it came from.
+		return createTokenMode((row) => {
+			const buffer = bufferNamespace._getScrollBuffer();
+			const line = buffer.getLine(row);
+			if (!line) return [];
+			const tokens: VtToken[] = [];
+			let currentToken: VtToken | null = null;
+			for (let col = 0; col < buffer.cols; col++) {
+				const cell = line.getCell(col);
+				const char = cell.getChars();
+				// Placeholder cells (trailing half of a wide glyph) have
+				// chars=""; the leading cell already wrote the glyph.
+				if (char.length === 0) continue;
+				const className = buildCellClassName(cell);
+				if (currentToken && currentToken.type === className) {
+					currentToken.value += char;
+					continue;
+				}
+				currentToken = { type: className, value: char };
+				tokens.push(currentToken);
+			}
+			return tokens;
+		});
+	}
+}
 
-		// Return a minimal mode object. TypeScript doesn't like partial modes,
-		// but Ace handles them fine at runtime. Cast through unknown to bypass.
-		return {
-			// Suppress Ace worker creation (VT mode doesn't need background processing)
-			createWorker: () => null,
-
-			getTokenizer: () => {
+/**
+ * A minimal Ace mode whose tokenizer asks `lineTokens` for each row. Ace
+ * handles the partial mode object fine at runtime, hence the cast.
+ */
+export function createTokenMode(
+	lineTokens: (row: number) => VtToken[],
+): Ace.SyntaxMode {
+	return {
+		createWorker: () => null,
+		getTokenizer: () => ({
+			getLineTokens: (lineText: string, _state: string, row: number) => {
+				const tokens = lineTokens(row);
 				return {
-					// Ace calls getLineTokens for each visible line.
-					//
-					// We walk the **cell grid** (not the line-text character
-					// stream) so that wide-char placeholders contribute their
-					// empty `chars` and combining-mark anchors contribute their
-					// multi-codepoint `chars` ("é" = e + combining acute) in the
-					// right token. The line-text Ace passed us is exactly the
-					// concatenation of `cell.chars` for all cells, so walking
-					// cells and joining `cell.chars` reproduces `lineText`
-					// byte-for-byte, but with each char correctly attributed to
-					// the cell it came from.
-					getLineTokens: (lineText: string, _state: string, row: number) => {
-						const tokens: VtToken[] = [];
-						const line = bufferNamespace._getScrollBuffer().getLine(row);
-
-						if (!line) {
-							// Empty line
-							return {
-								tokens: [{ type: "", value: lineText }],
-								state: "start",
-							};
-						}
-
-						// Group cells by attributes. We walk *cells*, not chars:
-						// a width-2 wide glyph occupies cells[i] (leading) plus
-						// cells[i+1] (placeholder, chars=""). The placeholder
-						// contributes 0 chars to the token stream so the line
-						// length still matches `lineText`.
-						let currentToken: VtToken | null = null;
-						const cols = bufferNamespace._getScrollBuffer().cols;
-
-						for (let col = 0; col < cols; col++) {
-							const cell = line.getCell(col);
-							const char = cell.getChars();
-							// Placeholder cells (trailing half of a wide glyph)
-							// have chars=""; tag them onto the leading cell's
-							// token so attribute groupings stay contiguous and
-							// the token stream contains no zero-length chunks
-							// that the renderer would have to special-case.
-							if (char.length === 0) {
-								// Skip — the leading wide cell already wrote its
-								// glyph and the placeholder's job is purely
-								// cursor accounting.
-								continue;
-							}
-							const className = buildCellClassName(cell);
-
-							if (currentToken && currentToken.type === className) {
-								// Extend current token
-								currentToken.value += char;
-							} else {
-								// Start new token
-								if (currentToken) {
-									tokens.push(currentToken);
-								}
-								currentToken = {
-									type: className,
-									value: char,
-								};
-							}
-						}
-
-						if (currentToken) {
-							tokens.push(currentToken);
-						}
-
-						return {
-							tokens:
-								tokens.length > 0 ? tokens : [{ type: "", value: lineText }],
-							state: "start",
-						};
-					},
+					tokens: tokens.length > 0 ? tokens : [{ type: "", value: lineText }],
+					state: "start",
 				};
 			},
-		} as unknown as Ace.SyntaxMode;
-	}
+		}),
+	} as unknown as Ace.SyntaxMode;
 }
 
 /**
@@ -150,26 +117,43 @@ export class VtMode {
 export function buildCellClassName(
 	cell: import("../types.js").BufferCell,
 ): string {
+	return buildAttrsClassName({
+		fgMode: cell.isFgDefault()
+			? "Default"
+			: cell.isFgPalette()
+				? "Palette"
+				: "Rgb",
+		fg: cell.getFgColor(),
+		bgMode: cell.isBgDefault()
+			? "Default"
+			: cell.isBgPalette()
+				? "Palette"
+				: "Rgb",
+		bg: cell.getBgColor(),
+		bold: cell.isBold(),
+		italic: cell.isItalic(),
+		underline: cell.isUnderline(),
+		dim: cell.isDim(),
+		inverse: cell.isInverse(),
+	});
+}
+
+const COLOR_MODE: Record<ScreenColorMode, number> = {
+	Default: 0,
+	Palette: 1,
+	Rgb: 2,
+};
+
+/**
+ * Build the token class name for a run's attributes. The single source of
+ * the class names both the terminal renderer and the buffer view emit.
+ */
+export function buildAttrsClassName(attrs: ScreenAttrs): string {
 	const classes: string[] = [];
-
-	// Determine fg/bg colors (handle inverse)
-	let fgColor = -1;
-	let fgMode = 0;
-	let bgColor = -1;
-	let bgMode = 0;
-
-	if (cell.isInverse()) {
-		// Swap fg and bg
-		fgColor = cell.getBgColor();
-		fgMode = cell.isBgDefault() ? 0 : cell.isBgPalette() ? 1 : 2;
-		bgColor = cell.getFgColor();
-		bgMode = cell.isFgDefault() ? 0 : cell.isFgPalette() ? 1 : 2;
-	} else {
-		fgColor = cell.getFgColor();
-		fgMode = cell.isFgDefault() ? 0 : cell.isFgPalette() ? 1 : 2;
-		bgColor = cell.getBgColor();
-		bgMode = cell.isBgDefault() ? 0 : cell.isBgPalette() ? 1 : 2;
-	}
+	const fgColor = attrs.inverse ? attrs.bg : attrs.fg;
+	const fgMode = COLOR_MODE[attrs.inverse ? attrs.bgMode : attrs.fgMode];
+	const bgColor = attrs.inverse ? attrs.fg : attrs.bg;
+	const bgMode = COLOR_MODE[attrs.inverse ? attrs.fgMode : attrs.bgMode];
 
 	// Foreground color
 	if (fgMode === 1) {
@@ -207,16 +191,16 @@ export function buildCellClassName(
 	}
 
 	// Text attributes
-	if (cell.isBold()) {
+	if (attrs.bold) {
 		classes.push("sterk-bold");
 	}
-	if (cell.isItalic()) {
+	if (attrs.italic) {
 		classes.push("sterk-italic");
 	}
-	if (cell.isUnderline()) {
+	if (attrs.underline) {
 		classes.push("sterk-underline");
 	}
-	if (cell.isDim()) {
+	if (attrs.dim) {
 		classes.push("sterk-dim");
 	}
 
